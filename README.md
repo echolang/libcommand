@@ -125,7 +125,7 @@ The whole driver is `examples/01-args.eco`. The pages it draws are `examples/03-
 ## Help
 
 The page is generated from the table. There is deliberately no `--all`. I want the compact page to stay compact: one line per option. The paragraphs live one command further in.
-
+ 
 ```
 greet build --help
 greet build --help optimize
