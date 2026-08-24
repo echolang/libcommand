@@ -22,12 +22,10 @@ That parse can refuse. The rest of this page is the table that made the refusal,
 
 ## Getting started
 
-You don't need epm. Put this repository beside your project and name it from your `module.eco`:
+From your project directory:
 
-```echo
-#[module: "myapp"]
-#[depends: "../libcommand"]
-#[sources: "src/*.eco"]
+```bash
+epm add echolang/libcommand --git https://github.com/echolang/libcommand --range ^0.1
 ```
 
 That is all. Echo sees the `command` namespace as soon as the module loads. The C shim (raw mode, the seam a prompt needs) rides along from libcommand's own `#[cc: sources]`. You don't compile `c/posix.c` or `c/win32.c` yourself. `isatty` and the window width already live on `std::io::stream`; colour policy (`NO_COLOR`, `COLUMNS`) stays in Echo.
