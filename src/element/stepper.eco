@@ -1,0 +1,413 @@
+/**
+ * The channel down the left of a prompt, and the only thing that draws it.
+ *
+ * A Stepper with `gutter` on writes a connected run:
+ *
+ *   ┌  create-app
+ *   │
+ *   ◇  Where should we create it?
+ *   │  ./my-app
+ *
+ * The same Stepper with `gutter` off writes two spaces and the row:
+ *
+ *   Where should we create it?
+ *     ./my-app
+ *
+ * One renderer, two channels. An element sees neither; it hands over rows and
+ * a Stepper decides how far left they start.
+ */
+
+namespace command::element;
+
+public enum StepState
+{
+    case active;
+    case done;
+    case failed;
+}
+
+public struct Stepper
+{
+    public bool $gutter;
+    public command::TerminalCapabilities $caps;
+
+    /**
+     * Resolved once, not per row. Every row drawn reaches for the bar or the
+     * ellipsis, so a repaint of a ten-item list asks for this dozens of times;
+     * `$caps->unicode` cannot change under a Stepper, so neither can the table.
+     */
+    public command::PromptTheme $theme;
+
+    constructor(bool $gutter, command::TerminalCapabilities $caps)
+    {
+        $this->gutter = $gutter;
+        $this->caps = $caps;
+        $this->theme = command::promptTheme($caps->unicode);
+    }
+
+    /**
+     * Columns the channel eats. A session spends one on the bar plus two of
+     * separation; on its own, two of indent.
+     */
+    const function leadWidth() : int32
+    {
+        if ($this->gutter) {
+            return 3;
+        }
+
+        return 2;
+    }
+
+    const function width() : int32
+    {
+        return command::liveWidth($this->caps);
+    }
+
+    /**
+     * The last column is deliberately never used. LiveRegion counts its rows
+     * by counting newlines and climbs that many lines to repaint; a row that
+     * reaches the full width wraps, the terminal then holds one more row than
+     * the region believes, and the next repaint erases the wrong block.
+     */
+    const function room() : int32
+    {
+        int32 $room = $this->width() - $this->leadWidth() - 1;
+
+        if ($room < 8) {
+            $room = 8;
+        }
+
+        return $room;
+    }
+
+    const function context() : StepContext
+    {
+        string $pointer = $this->theme->pointer;
+
+        if ($this->gutter) {
+            $pointer = '';
+        }
+
+        return StepContext($this->caps, $this->theme, $this->room(), $pointer, $this->gutter);
+    }
+
+    /**
+     * A body row: the bar, then the row. Off-session the bar is absent, not
+     * replaced by a space.
+     */
+    const function row(const string& $body) : string
+    {
+        return $this->leadRow($this->theme->bar, command::SGR_MUTED, $body);
+    }
+
+    /**
+     * A body row of a step that is still live, in that step's own colour.
+     * The channel is what says which step you are answering: a run of settled
+     * grey bars with one lit stretch reads as a place in a list, where a
+     * uniformly grey column reads as no bar at all.
+     */
+    const function stateRow(const string& $body, StepState $state) : string
+    {
+        return $this->leadRow($this->theme->bar, $this->channelSgr($state), $body);
+    }
+
+    /**
+     * The colour the bar takes for a step in this state. Not `stateSgr`:
+     * that answers for the symbol, and a submitted step is a green ◇ over a
+     * grey bar - the mark stays, the channel settles.
+     */
+    const function channelSgr(StepState $state) : string
+    {
+        if ($state == StepState::active) {
+            return command::SGR_SECONDARY;
+        }
+
+        if ($state == StepState::failed) {
+            return command::SGR_WARNING;
+        }
+
+        return command::SGR_MUTED;
+    }
+
+    /**
+     * The cap that closes a live frame, in the same colour as its channel.
+     * Nothing off-session, where there is no channel to close.
+     */
+    const function foot(StepState $state) : string
+    {
+        return $this->spacerOf($this->theme->barEnd, $this->channelSgr($state));
+    }
+
+    /**
+     * A row led by a symbol in the bar column. Off-session the symbol is
+     * dropped: a lone `◆` with no bar under it marks nothing.
+     */
+    const function leadRow(const string& $lead, const string& $sgr, const string& $body) : string
+    {
+        string $fit = command::fitHead($body, $this->room(), $this->theme->ellipsis);
+
+        if (!$this->gutter) {
+            if ($fit->empty()) {
+                return '';
+            }
+
+            return "  {$fit}";
+        }
+
+        // no body, no separation - a row of trailing spaces is invisible until
+        // someone copies the transcript
+        if ($fit->empty()) {
+            return $this->spacerOf($lead, $sgr);
+        }
+
+        // an empty lead would collapse the channel to two spaces and break the
+        // column, since styled('') is ''. in a run the bar is the floor
+        string $glyph = $lead;
+        string $paint = $sgr;
+
+        if ($glyph->empty()) {
+            $glyph = $this->theme->bar;
+            $paint = command::SGR_MUTED;
+        }
+
+        string $g = command::styled($glyph, $paint, $this->caps->color);
+
+        return "{$g}  {$fit}";
+    }
+
+    /** The title row of a step that is waiting for an answer. */
+    const function askRow(const string& $title) : string
+    {
+        return $this->leadRow($this->stateSymbol(.active), $this->stateSgr(.active), $title);
+    }
+
+    /**
+     * A row led by a glyph that has to survive off-session too - a spinner
+     * frame, a progress mark. In a run it takes the bar column; on its own it
+     * sits inside the row.
+     */
+    const function glyphRow(const string& $glyph, const string& $sgr, const string& $body) : string
+    {
+        if ($this->gutter) {
+            return $this->leadRow($glyph, $sgr, $body);
+        }
+
+        string $fit = command::fitHead($body, $this->glyphRoom($glyph), $this->theme->ellipsis);
+        string $g = command::styled($glyph, $sgr, $this->caps->color);
+
+        return "  {$g} {$fit}";
+    }
+
+    /**
+     * Columns the body of a glyph row may actually use - what `glyphRow` will
+     * fit it to. A widget that sizes itself to the leftover, a progress bar,
+     * asks for this and subtracts only its own parts.
+     *
+     * It must not count the indent itself: the reserved last column is decided
+     * in `room()`, and a second expression of the same arithmetic elsewhere
+     * agrees only until `leadWidth` changes.
+     */
+    const function glyphRoom(const string& $glyph) : int32
+    {
+        if ($this->gutter) {
+            return $this->room();
+        }
+
+        return $this->room() - command::textWidth($glyph) - 1;
+    }
+
+    /**
+     * The bare connecting bar. Nothing off-session: a blank line between every
+     * widget is a session's rhythm, not this library's.
+     */
+    const function spacer() : string
+    {
+        return $this->spacerOf($this->theme->bar, command::SGR_MUTED);
+    }
+
+    const function spacerOf(const string& $lead, const string& $sgr) : string
+    {
+        if (!$this->gutter) {
+            return '';
+        }
+
+        if ($lead->empty()) {
+            return command::styled($this->theme->bar, command::SGR_MUTED, $this->caps->color);
+        }
+
+        return command::styled($lead, $sgr, $this->caps->color);
+    }
+
+    const function open(const string& $title) : string
+    {
+        return $this->leadRow($this->theme->barStart, command::SGR_MUTED, $title);
+    }
+
+    const function close(const string& $message) : string
+    {
+        string $out = $this->spacer();
+
+        if (!$out->empty()) {
+            $out->append(std::io::NEWLINE);
+        }
+
+        $out->append($this->leadRow($this->theme->barEnd, command::SGR_MUTED, $message));
+
+        return $out;
+    }
+
+    const function stateSymbol(StepState $state) : string
+    {
+        if ($state == StepState::active) {
+            return $this->theme->stepActive;
+        }
+
+        if ($state == StepState::failed) {
+            return $this->theme->stepError;
+        }
+
+        return $this->theme->stepDone;
+    }
+
+    const function stateSgr(StepState $state) : string
+    {
+        if ($state == StepState::active) {
+            return command::SGR_SECONDARY;
+        }
+
+        if ($state == StepState::failed) {
+            return command::SGR_WARNING;
+        }
+
+        return command::SGR_SUCCESS;
+    }
+}
+
+/**
+ * A whole step: its title under the state symbol, then one bar row per body
+ * row. `$rows` is whatever the element handed over - its live body while it
+ * runs, its summary once it is answered.
+ */
+function frameRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows, StepState $state) : string
+{
+    string $out = $s->leadRow($s->stateSymbol($state), $s->stateSgr($state), $title);
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        $out->append(std::io::NEWLINE);
+        $out->append($s->stateRow($rows[$i], $state));
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * An answered step. In a run it is the title under a done symbol with the
+ * value on the bar below it, which is what leaves a readable transcript:
+ *
+ *   ◇  Which features?
+ *   │  Logging, Caching
+ *
+ * On its own there is no bar to hang a second row from, so the value joins
+ * the title on one line.
+ */
+function summaryRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows) : string
+{
+    if ($s->gutter) {
+        return frameRowsOf($s, $title, $rows, .done);
+    }
+
+    string $body = $title;
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        $body->append('  ');
+        $body->append($rows[$i]);
+        $i = $i + 1;
+    }
+
+    return $s->leadRow('', '', $body);
+}
+
+/**
+ * The live frame of a step - what a prompt repaints on every keystroke, and
+ * the only shape that gets the closing corner. A settled step does not: the
+ * run carries on below it, and a foot there would cut the column in two.
+ *
+ * The cap lives here rather than in `frameRowsOf` because that function is
+ * also how a summary and the numbered fallback are drawn, and neither of
+ * those is a frame anyone is still typing at.
+ */
+function stepFrame<T : Step>(const Stepper& $s, const T& $step, StepState $state) : string
+{
+    string $out = frameRowsOf($s, $step->head(), $step->body($s->context()), $state);
+    string $foot = $s->foot($state);
+
+    if ($foot->empty()) {
+        return $out;
+    }
+
+    $out->append(std::io::NEWLINE);
+    $out->append($foot);
+
+    return $out;
+}
+
+function stepSummary<T : Step>(const Stepper& $s, const T& $step) : string
+{
+    return summaryRowsOf($s, $step->head(), $step->summary($s->context()));
+}
+
+/**
+ * An answered step, settled onto the transcript. The erase before the commit
+ * is load-bearing: `commit` repaints, and a live frame left on screen would be
+ * summarised underneath itself.
+ */
+function settle<T : Step>(const Stepper& $s, const T& $step, LiveRegion $region) : void
+{
+    string $line = stepSummary($s, $step);
+    $region->erase();
+    $region->commit($line);
+}
+
+/**
+ * The live half of a step: raw mode, one frame, then keys until the step says
+ * it is answered.
+ *
+ * `false` means the terminal refused raw mode, which is the caller's cue to
+ * take its own line path instead - the one thing a driver cannot decide for a
+ * prompt, because only the prompt knows how to read an answer off one line.
+ *
+ * A prompt contributes `feed()` and nothing else. Everything here was written
+ * once per prompt before, which is how the three of them came to disagree
+ * about what an answered step looks like.
+ */
+function drive<T : Step>(const Stepper& $s, T $step, LiveRegion $region, const string& $who) : bool
+{
+    RawMode $raw = RawMode();
+
+    if (!$raw->on) {
+        return false;
+    }
+
+    $region->paint(stepFrame($s, $step, StepState::active));
+
+    while (true) {
+        KeyEvent $event = readEvent();
+
+        if ($event->key == Key::eof) {
+            $region->erase();
+            $raw->leave();
+            die("{$who}: stdin closed");
+        }
+
+        if ($step->feed($event)) {
+            break;
+        }
+    }
+
+    $raw->leave();
+
+    return true;
+}

@@ -1,0 +1,79 @@
+/**
+ * What a prompt owes a Stepper.
+ *
+ * An element answers three questions - what am I called, what do I look like
+ * while I am running, what do I look like once I am answered - and returns
+ * plain rows for each. It does not indent them, does not truncate them, and
+ * never draws a bar, a corner or a step symbol. That is the channel down the
+ * left, and the channel belongs to the Stepper.
+ *
+ * The split is what makes a session optional: the same element renders inside
+ * a connected run or on its own, and only the Stepper knows the difference.
+ */
+
+namespace command::element;
+
+/**
+ * What an element is allowed to know about the frame around it.
+ *
+ * `$room` is the columns a body row has left after the channel is deducted.
+ * Only one element needs it - a text input scrolls sideways, and the window
+ * it scrolls within is exactly this wide.
+ *
+ * `$pointer` and `$muted` are here rather than read from the theme because
+ * *how* focus is marked is a channel decision. On its own a prompt points at
+ * the focused row; in a session it dims every other one instead, which is
+ * what makes a run read as one column rather than a stack of lists.
+ */
+public struct StepContext
+{
+    public command::TerminalCapabilities $caps;
+    public command::PromptTheme $theme;
+    public int32 $room;
+    public string $pointer;
+    public bool $muted;
+
+    constructor(
+        command::TerminalCapabilities $caps,
+        command::PromptTheme $theme,
+        int32 $room,
+        string $pointer,
+        bool $muted
+    )
+    {
+        $this->caps = $caps;
+        $this->theme = $theme;
+        $this->room = $room;
+        $this->pointer = $pointer;
+        $this->muted = $muted;
+    }
+}
+
+/**
+ * The three drawing questions, and the one driving question.
+ *
+ * `feed` is what makes the live loop generic: a prompt says what one key did
+ * and whether that settled the answer, and `drive` owns everything around it -
+ * raw mode, the repaint, the refusal on a closed stdin. Repainting on a key
+ * belongs to `feed` because only the element knows a key changed anything.
+ */
+interface Step
+{
+    const function head() : string;
+    const function body(const StepContext& $ctx) : array<string>;
+    const function summary(const StepContext& $ctx) : array<string>;
+    function feed(const KeyEvent& $event) : bool;
+}
+
+/**
+ * The `body()`/`summary()` of a step that is one row long - which is most of
+ * them. Saves every single-row element writing the same three-line array
+ * dance in two methods.
+ */
+function oneRow(const string& $s) : array<string>
+{
+    array<string> $rows = array<string>();
+    $rows[] = $s;
+
+    return $rows;
+}

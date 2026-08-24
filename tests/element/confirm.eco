@@ -1,0 +1,103 @@
+/**
+ * Yes or no: arrows, letters, and what a pipe gets.
+ */
+
+use command;
+use command::element;
+
+test confirm_starts_on_yes
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
+
+    assert($c->result(), 'yes by default');
+    assert($c->frame()->contains('● Yes / ○ No'), 'yes is filled');
+}
+
+test confirm_can_start_on_no
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?', false);
+
+    assert(!$c->result(), 'no');
+}
+
+test confirm_arrows_toggle
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
+    $c->feed(element::Key::left);
+
+    assert(!$c->result(), 'left flipped it');
+    assert($c->frame()->contains('○ Yes / ● No'), 'no is filled');
+
+    $c->feed(element::Key::right);
+
+    assert($c->result(), 'and back');
+}
+
+test confirm_letters_answer_outright
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
+
+    assert($c->feed(element::KeyEvent(element::Key::text, 'n')), 'n finishes');
+    assert(!$c->result(), 'n is no');
+
+    element::Confirm $yes = promptCtx()->create<element::Confirm>('Continue?', false);
+
+    assert($yes->feed(element::KeyEvent(element::Key::text, 'Y')), 'Y finishes');
+    assert($yes->result(), 'and Y is yes, whatever the case');
+}
+
+test confirm_ignores_a_letter_that_is_not_an_answer
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
+    $c->feed(element::KeyEvent(element::Key::text, 'q'));
+
+    assert($c->result(), 'left where it was');
+}
+
+test confirm_enter_submits
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
+
+    assert($c->feed(element::Key::enter), 'enter is always an answer');
+    assert($c->region->ctx->captured->contains('Continue?  Yes'), 'the answer is committed');
+}
+
+test confirm_words_can_be_renamed
+{
+    element::Confirm $c = promptCtx()->create<element::Confirm>('Overwrite?');
+    $c->words('Replace', 'Keep');
+
+    assert($c->frame()->contains('● Replace / ○ Keep'), 'the caller names them');
+}
+
+test confirm_in_a_session_hangs_off_the_bar
+{
+    command::CLIContext $ctx = .buffer(promptCaps());
+    $ctx->beginStepper('x');
+    element::Confirm $c = $ctx->create<element::Confirm>('Continue?');
+
+    assert($c->frame() == "◆  Continue?\n│  ● Yes / ○ No\n└", 'a step, a bar row, and the cap');
+}
+
+test confirm_in_a_session_dims_the_other_answer
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 40, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Confirm $c = $ctx->create<element::Confirm>('Continue?');
+    string $got = $c->frame();
+
+    assert($got->contains(command::SGR_DIM), 'the answer not chosen is dimmed');
+    assert(!$got->contains(command::SGR_INFO), 'and nothing shouts');
+}
+
+test confirm_summary_is_two_rows_in_a_session
+{
+    command::CLIContext $ctx = .buffer(promptCaps());
+    $ctx->beginStepper('x');
+    element::Confirm $c = $ctx->create<element::Confirm>('Continue?');
+    $c->feed(element::Key::left);
+    $c->feed(element::Key::enter);
+
+    assert($c->region->ctx->captured->contains("◇  Continue?\n│  No"), 'title, then the answer');
+}

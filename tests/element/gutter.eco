@@ -1,0 +1,143 @@
+/**
+ * A run: opening, closing, marks, and the note box.
+ */
+
+use command;
+use command::element;
+
+function plainCtx() : command::CLIContext
+{
+    return .buffer(command::TerminalCapabilities(false, true, 60, true));
+}
+
+test stepper_opens_with_a_corner
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('create-app');
+
+    assert($ctx->captured == "┌  create-app\n", 'the run starts');
+}
+
+test stepper_closes_with_a_bar_then_a_corner
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('create-app');
+    $ctx->captured = '';
+    $ctx->endStepper('Done');
+
+    assert($ctx->captured == "│\n└  Done\n", 'a bar, then the end');
+}
+
+test stepper_closes_clean_with_no_message
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('x');
+    $ctx->captured = '';
+    $ctx->endStepper();
+
+    assert($ctx->captured == "│\n└\n", 'no row of trailing spaces');
+}
+
+test stepper_end_only_fires_once
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('x');
+    $ctx->endStepper('a');
+    $ctx->captured = '';
+    $ctx->endStepper('b');
+
+    assert($ctx->captured == '', 'a closed run stays closed');
+}
+
+test stepper_marks_carry_their_own_symbol
+{
+    element::Stepper $ch = element::Stepper(true, command::TerminalCapabilities(false, true, 60, true));
+    command::SpinnerTheme $spin = command::spinnerTheme(true);
+
+    assert($ch->leadRow($ch->theme->markInfo, command::SGR_INFO, 'one') == '●  one', 'info');
+    assert($ch->leadRow($ch->theme->stepError, command::SGR_WARNING, 'two') == '▲  two', 'warn');
+    assert($ch->leadRow($spin->outcome(false), command::outcomeSgr(false), 'three') == '■  three', 'error');
+    assert($ch->leadRow($spin->outcome(true), command::outcomeSgr(true), 'four') == '✔  four', 'success');
+}
+
+test stepper_marks_leave_a_bar_above_themselves
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('x');
+    $ctx->captured = '';
+    $ctx->printError('one');
+
+    assert($ctx->captured == "│\n■  one\n", 'a gap, then the mark');
+}
+
+test stepper_note_box_closes_on_every_row
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('x');
+    $ctx->captured = '';
+    $ctx->gap();
+    $ctx->println(element::noteFrame($ctx->channel(), 'Heads up', "line one\nline two"));
+
+    array<string> $rows = str::split($ctx->captured, "\n")->owned();
+
+    // the gap, four box rows, the body rows, the foot, and a trailing empty
+    assert($rows->count() == 8, 'seven rows and the final newline');
+    assert($rows[1]->starts('◇  Heads up ─'), 'the title opens the rule');
+    assert($rows[1]->ends('╮'), 'and turns the corner');
+    assert($rows[6]->starts('├─'), 'the foot joins the bar');
+    assert($rows[6]->ends('╯'), 'and closes the box');
+
+    // every row of the box is exactly as wide as its top
+    int32 $w = command::textWidth($rows[1]);
+    assert(command::textWidth($rows[2]) == $w, 'blank row');
+    assert(command::textWidth($rows[3]) == $w, 'first body row');
+    assert(command::textWidth($rows[4]) == $w, 'second body row');
+    assert(command::textWidth($rows[6]) == $w, 'foot');
+}
+
+test stepper_note_degrades_without_a_box_off_run
+{
+    element::Stepper $off = element::Stepper(false, command::TerminalCapabilities(false, true, 60, true));
+    string $got = element::noteFrame($off, 'Heads up', 'line one');
+
+    assert($got == "  Heads up\n  line one", 'a title and an indented body');
+    assert(!$got->contains('╮'), 'nothing to hang a box from');
+}
+
+test stepper_note_stays_inside_the_terminal
+{
+    command::CLIContext $ctx = .buffer(
+        command::TerminalCapabilities(false, true, 24, true)
+    );
+    $ctx->beginStepper('x');
+    $ctx->captured = '';
+    $ctx->gap();
+    $ctx->println(element::noteFrame($ctx->channel(), 'a', 'a very long line that will not fit inside twenty-four columns'));
+
+    array<string> $rows = str::split($ctx->captured, "\n")->owned();
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        assert(command::textWidth($rows[$i]) < 24, 'no row may reach the edge');
+        $i = $i + 1;
+    }
+}
+
+test print_error_off_run_is_the_badge
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->printError('Aborted!');
+
+    assert($ctx->captured->contains('error: Aborted!'), 'the refusal badge');
+    assert(!$ctx->captured->contains('■'), 'not a channel mark');
+}
+
+#[tests: expects death]
+test begin_stepper_twice_dies
+{
+    command::CLIContext $ctx = plainCtx();
+    $ctx->beginStepper('a');
+    $ctx->beginStepper('b');
+}
+
+

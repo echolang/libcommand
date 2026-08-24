@@ -1,0 +1,34 @@
+// standalone prompts: a radio, checks, a typed line, a yes or no.
+// a TTY gets arrow keys; a pipe gets a numbered list.
+//
+//   echoc run -m . examples/06-prompts.eco
+//   printf '1\n1\nmy-app\ny\n' | echoc run -m . examples/06-prompts.eco
+
+use command;
+use command::element;
+
+command::CLIContext $ctx = .resolve(.auto, .stderr);
+
+$fruits = ['Apple', 'Banana', 'Orange'];
+$fruit = element::select($ctx, 'Pick a fruit', $fruits);
+
+$q = $ctx->create<element::Select>('Which features?', element::SelectKind::checks);
+$q->choice('Logging');
+$q->choice('Caching');
+$q->choice('Compression');
+$q->pick('Logging');
+$on = $q->ask();
+
+// hint is shown in the empty field; otherwise is what an empty line means
+$where = $ctx->create<element::Text>('Where should we create it?');
+$where->hint('./my-app');
+$where->otherwise('./my-app');
+$dir = $where->ask();
+
+$go = element::confirm($ctx, 'Continue?');
+
+$features = str::join($on, ', ');
+echo "fruit: {$fruit[0]}";
+echo "features: {$features}";
+echo "dir: {$dir}";
+echo "continue: {$go}";

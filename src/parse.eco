@@ -1,0 +1,461 @@
+/**
+ * argv → stated values. Nothing here is settled: --color auto is still the
+ * word "auto", and --help is an answer the driver draws, not an exit.
+ *
+ * The walk has a cursor, a word list and a filling Parsed. That state is a
+ * Parser. Outcome still carries the partial parse on refusal, so a bad flag
+ * still takes the colour the invocation asked for.
+ */
+
+namespace command;
+
+public struct Parsed
+{
+    public Subcommand $command;
+    public bool $hasCommand;
+    public array<string> $positionals;
+    public array<string> $tail;
+    public bool $sawSeparator;
+    public bool $wantsHelp;
+    public bool $wantsVersion;
+    public string $helpTopic;
+
+    /** The option the topic named, or -1 for no topic. */
+    public int32 $helpTopicId;
+    public array<bool> $stated;
+    public array<string> $value;
+    public array<array<string>> $repeated;
+
+    constructor()
+    {
+        $this->command = Subcommand(-1, 0);
+        $this->hasCommand = false;
+        $this->positionals = array<string>();
+        $this->tail = array<string>();
+        $this->sawSeparator = false;
+        $this->wantsHelp = false;
+        $this->wantsVersion = false;
+        $this->helpTopic = '';
+        $this->helpTopicId = -1;
+        $this->stated = array<bool>();
+        $this->value = array<string>();
+        $this->repeated = array<array<string>>();
+    }
+
+    public const function stated(Flag $f) : bool
+    {
+        return $this->stated[$f->id];
+    }
+
+    public const function stated(Arg $a) : bool
+    {
+        return $this->stated[$a->id];
+    }
+
+    public const function value(Arg $a) : string
+    {
+        return $this->value[$a->id];
+    }
+
+    public const function values(Arg $a) : array<string>
+    {
+        return $this->repeated[$a->id];
+    }
+
+    public const function selectedBit() : int32
+    {
+        if ($this->hasCommand) {
+            return $this->command->bit;
+        }
+
+        return 0;
+    }
+
+    public const function subject(const Command& $app) : string
+    {
+        if (!$this->hasCommand) {
+            return $app->name;
+        }
+
+        return $app->commands[$this->command->id]->name;
+    }
+}
+
+public struct Outcome
+{
+    public Parsed $parsed;
+    public Error? $error;
+
+    constructor(Parsed $parsed, Error? $error)
+    {
+        $this->parsed = $parsed;
+        $this->error = $error;
+    }
+}
+
+class Parser
+{
+    public Command $app;
+    Parsed $out;
+    array<string> $words;
+    usize $i;
+
+    constructor(Command $app)
+    {
+        $this->app = $app;
+        $this->out = Parsed();
+        $this->words = array<string>();
+        $this->i = 0;
+    }
+
+    public function parse(const array<string>& $argv) : Outcome
+    {
+        $this->out = Parsed();
+        usize $n = 0;
+
+        while ($n < $this->app->options->count()) {
+            $this->out->stated[] = false;
+            $this->out->value[] = $this->app->options[$n]->fallback;
+            $this->out->repeated[] = array<string>();
+            $n = $n + 1;
+        }
+
+        $this->words = array<string>();
+        bool $inTail = false;
+        usize $at = 1;
+
+        while ($at < $argv->count()) {
+            string $word = $argv[$at];
+            $at = $at + 1;
+
+            if ($inTail) {
+                $this->out->tail[] = $word;
+                continue;
+            }
+
+            if ($word == '--') {
+                $this->out->sawSeparator = true;
+                $inTail = true;
+                continue;
+            }
+
+            $this->words[] = $word;
+        }
+
+        $this->i = 0;
+
+        while ($this->i < $this->words->count()) {
+            Outcome? $stop = $this->takeWord();
+
+            if ($stop != null) {
+                return $stop ?? Outcome($this->out, null);
+            }
+        }
+
+        $this->out->wantsHelp = $this->out->stated[$this->app->help->id];
+        $this->out->wantsVersion = $this->out->stated[$this->app->versionFlag->id];
+
+        if ($this->out->wantsHelp || $this->out->wantsVersion) {
+            if ($this->out->wantsHelp && $this->out->positionals->count() == 1) {
+                Outcome? $topic = $this->takeHelpTopic();
+
+                if ($topic != null) {
+                    return $topic ?? Outcome($this->out, null);
+                }
+            }
+
+            return Outcome($this->out, null);
+        }
+
+        return Outcome($this->out, $this->finish());
+    }
+
+    function takeWord() : Outcome?
+    {
+        string $word = $this->words[$this->i];
+        Option? $found = null;
+        string $spelled = $word;
+        string $attached = '';
+        bool $hasAttached = false;
+
+        if ($word->size() > 2 && $word->starts('--')) {
+            string $rest = $word->sub(2, $word->size() - 2);
+            usize $eq = $rest->find('=');
+
+            if ($eq < $rest->size()) {
+                $hasAttached = true;
+                $attached = $rest->sub($eq + 1, $rest->size() - $eq - 1);
+                $rest = $rest->sub(0, $eq);
+            }
+
+            $found = $this->app->optionForLong($rest);
+            $spelled = "--{$rest}";
+        }
+        else if ($word->size() > 1 && $word->starts('-') && !$word->starts('--')) {
+            $spelled = $word;
+
+            if ($word->size() == 2) {
+                $found = $this->app->optionForShort($word->sub(1, 1));
+            }
+        }
+        else {
+            if (!$this->out->hasCommand && $this->app->commands->count() > 0) {
+                SubcommandInfo? $maybe = $this->app->subcommandForWord($word);
+
+                SubcommandInfo $cmd = guard $maybe else {
+                    return Outcome($this->out, .unknownCommand($word, $this->app->commandWordList()));
+                }
+                $this->out->command = Subcommand($cmd->id, $cmd->bit);
+                $this->out->hasCommand = true;
+                $this->i = $this->i + 1;
+                return null;
+            }
+
+            $this->out->positionals[] = $word;
+            $this->i = $this->i + 1;
+            return null;
+        }
+
+        if ($found == null) {
+            if (!$word->starts('--') && $word->size() > 2) {
+                return Outcome($this->out, .shortNotSingle($word));
+            }
+
+            return Outcome($this->out, .unknownOption($spelled));
+        }
+
+        Option $option = guard $found else {
+            return Outcome($this->out, .unknownOption($spelled));
+        }
+
+        if (!$option->accepted($this->out->selectedBit())) {
+            return Outcome(
+                $this->out,
+                .notOnCommand($this->out->subject($this->app), $option->flagNames())
+            );
+        }
+
+        if (!$option->takesValue()) {
+            if ($hasAttached) {
+                return Outcome($this->out, .unexpectedValue($option->name));
+            }
+
+            $this->takeFlag($option);
+            $this->i = $this->i + 1;
+            return null;
+        }
+
+        string $raw = $attached;
+
+        if (!$hasAttached) {
+            if ($this->i + 1 >= $this->words->count()) {
+                return Outcome($this->out, .needsValue($option->spelling()));
+            }
+
+            string $next = $this->words[$this->i + 1];
+
+            if ($this->looksLikeFlag($next)) {
+                return Outcome($this->out, .valueLooksLikeFlag($option->flagNames(), $next));
+            }
+
+            $raw = $next;
+            $this->i = $this->i + 1;
+        }
+
+        Error? $bad = $this->acceptValue($option, $raw);
+
+        if ($bad != null) {
+            return Outcome($this->out, $bad);
+        }
+
+        $this->takeValue($option, $raw);
+        $this->i = $this->i + 1;
+        return null;
+    }
+
+    function takeHelpTopic() : Outcome?
+    {
+        string $topic = $this->out->positionals[0];
+        Option? $named = null;
+
+        if ($topic->size() == 1) {
+            $named = $this->app->optionForShort($topic);
+        }
+        else {
+            $named = $this->app->optionForLong($topic);
+        }
+
+        Option $opt = guard $named else {
+            return null;
+        }
+
+        if (!$opt->accepted($this->out->selectedBit())) {
+            return Outcome(
+                $this->out,
+                .notOnCommand($this->out->subject($this->app), $opt->flagNames())
+            );
+        }
+
+        $this->out->helpTopic = $opt->name;
+        $this->out->helpTopicId = $opt->id;
+        return null;
+    }
+
+    function takeFlag(const Option& $option) : void
+    {
+        $this->out->stated[$option->id] = true;
+    }
+
+    function takeValue(const Option& $option, const string& $word) : void
+    {
+        $this->out->stated[$option->id] = true;
+        $this->out->value[$option->id] = $word;
+
+        if ($option->arity == OptionArity::repeated) {
+            $this->out->repeated[$option->id][] = $word;
+        }
+    }
+
+    function acceptValue(const Option& $option, const string& $word) : Error?
+    {
+        if ($option->values->count() == 0) {
+            return null;
+        }
+
+        int32 $bit = $this->out->selectedBit();
+        usize $n = 0;
+
+        while ($n < $option->values->count()) {
+            if ($option->values[$n]->name == $word) {
+                if (!$option->values[$n]->accepted($option, $bit)) {
+                    return .unknownValue($option->name, $word, $option->valueCsv());
+                }
+
+                return null;
+            }
+
+            $n = $n + 1;
+        }
+
+        return .unknownValue($option->name, $word, $option->valueCsv());
+    }
+
+    function looksLikeFlag(const string& $word) : bool
+    {
+        if ($word->size() <= 1 || !$word->starts('-')) {
+            return false;
+        }
+
+        if ($word->starts('--')) {
+            return true;
+        }
+
+        if ($word->size() != 2) {
+            return false;
+        }
+
+        return $this->app->optionForShort($word->sub(1, 1)) != null;
+    }
+
+    function finish() : Error?
+    {
+        if ($this->app->commands->count() > 0 && !$this->out->hasCommand) {
+            return .noCommand;
+        }
+
+        if ($this->out->sawSeparator && !$this->app->acceptsTail) {
+            return .unexpectedSeparator($this->out->subject($this->app));
+        }
+
+        Positionals $spec = $this->app->positionals;
+        string $who = $this->app->name;
+
+        if ($this->out->hasCommand) {
+            SubcommandInfo $info = $this->app->commands[$this->out->command->id];
+            $spec = $info->positionals;
+            $who = $info->name;
+        }
+
+        int32 $n = i32Of($this->out->positionals->count());
+
+        if ($n < $spec->min) {
+            return .tooFewPositionals($who, $spec->metavar);
+        }
+
+        if ($spec->max >= 0 && $n > $spec->max) {
+            if ($spec->max == 0) {
+                return .unexpectedPositionals($who);
+            }
+
+            return .tooManyPositionals($who);
+        }
+
+        int32 $need = ROOT_BIT;
+
+        if ($this->out->hasCommand) {
+            $need = $this->out->command->bit;
+        }
+
+        usize $i = 0;
+
+        while ($i < $this->app->options->count()) {
+            usize $at = $i;
+            $i = $i + 1;
+
+            if ($this->app->options[$at]->requiredBy == 0 || $this->out->stated[$at]) {
+                continue;
+            }
+
+            if (($this->app->options[$at]->requiredBy & $need) != 0) {
+                return .missingRequired(
+                    $this->out->subject($this->app),
+                    $this->app->options[$at]->flagNames()
+                );
+            }
+        }
+
+        $i = 0;
+
+        while ($i < $this->app->options->count()) {
+            usize $at = $i;
+            $i = $i + 1;
+            int32 $exclusion = $this->app->options[$at]->exclusion;
+
+            if ($exclusion == 0 || !$this->out->stated[$at]) {
+                continue;
+            }
+
+            usize $o = 0;
+
+            while ($o < $this->app->options->count()) {
+                usize $other = $o;
+                $o = $o + 1;
+
+                if ($other == $at || $this->app->options[$other]->exclusion != $exclusion) {
+                    continue;
+                }
+
+                if ($this->out->stated[$other]) {
+                    return .exclusion(
+                        $this->app->options[$at]->flagNames(),
+                        $this->app->options[$other]->flagNames()
+                    );
+                }
+            }
+        }
+
+        return null;
+    }
+}
+
+public function capabilitiesFor(
+    const Parsed& $p,
+    const Command& $app,
+    TerminalStream $stream
+) : TerminalCapabilities
+{
+    string $word = $p->value[$app->color->id];
+    ColorChoice $choice = colorNamed($word) ?? .auto;
+
+    return resolve($choice, $stream);
+}

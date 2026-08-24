@@ -1,0 +1,160 @@
+/**
+ * A spinner that keeps moving while this thread is busy.
+ *
+ * The work stays here. The animation is the other thread. Join that thread
+ * before the final commit, so the last line is not a race with the last paint.
+ */
+
+namespace command::element;
+
+use std::thread;
+
+#[atomic]
+public class Spinner : LiveTicks
+{
+    public LiveLine $line;
+    public Ticker $ticker;
+    public string $text;
+    public int32 $frame;
+    public command::CLIContext $ctx;
+
+    /** Resolved once: the tick runs 12.5x a second and only ever indexes it. */
+    public command::SpinnerTheme $spin;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->line = LiveLine($ctx);
+        $this->ticker = Ticker();
+        $this->text = '';
+        $this->frame = 0;
+        $this->ctx = $ctx;
+        $this->spin = command::spinnerTheme($ctx->caps->unicode);
+    }
+
+    destructor()
+    {
+        $this->stop();
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    public function start(string $message) : void
+    {
+        if ($this->ticker->running->load()) {
+            die('command::element::Spinner: already running');
+        }
+
+        $this->ctx->gap();
+        $this->setText($message);
+        $this->frame = 0;
+
+        if (!$this->line->interactive()) {
+            $this->ticker->arm('command::element::Spinner');
+            return;
+        }
+
+        $this->line->paint($this->lockedRow($message));
+        $this->ticker->start('command::element::Spinner', $this);
+    }
+
+    public function update(string $message) : void
+    {
+        $this->setText($message);
+    }
+
+    public function succeed(string $message) : void
+    {
+        $this->ticker->halt();
+        $this->line->commit($this->finalRow(true, $message));
+    }
+
+    public function fail(string $message) : void
+    {
+        $this->ticker->halt();
+        $this->line->commit($this->finalRow(false, $message));
+    }
+
+    public function stop() : void
+    {
+        $this->ticker->halt();
+        $this->line->erase();
+    }
+
+    public function suspend() : void
+    {
+        $this->ticker->pause();
+        $this->line->erase();
+    }
+
+    function tickOnce() : void
+    {
+        string? $row = $this->takeRow();
+        string $text = guard $row else {
+            return;
+        }
+
+        $this->line->paint($text);
+    }
+
+    function takeRow() : string?
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if (!$this->ticker->running->load() || $this->ticker->paused->load()) {
+            return null;
+        }
+
+        string $row = $this->spinRow($this->text);
+        $this->frame = $this->frame + 1;
+
+        return $row;
+    }
+
+    function lockedRow(string $message) : string
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        return $this->spinRow($message);
+    }
+
+    const function spinRow(const string& $message) : string
+    {
+        return $this->channel()->glyphRow(
+            $this->spin->frameAt($this->frame),
+            command::SGR_INFO,
+            $message
+        );
+    }
+
+    const function finalRow(bool $ok, const string& $message) : string
+    {
+        return $this->channel()->glyphRow(
+            $this->spin->outcome($ok),
+            command::outcomeSgr($ok),
+            $message
+        );
+    }
+
+    function setText(string $message) : void
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        $this->text = $message;
+    }
+}
+
+public function spin<T>(
+    command::CLIContext $ctx,
+    string $message,
+    function<T()> $work
+) : T
+{
+    Spinner $s = Spinner($ctx);
+    $s->start($message);
+    T $v = $work();
+    $s->succeed($message);
+
+    return $v;
+}

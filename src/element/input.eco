@@ -1,0 +1,480 @@
+/**
+ * A line of text the user types.
+ *
+ * Interactive: printable keys, backspace, delete, left/right, home/end,
+ * Ctrl-W and Ctrl-U. Otherwise a plain question and a line of stdin.
+ *
+ * A placeholder is a hint and never becomes the answer; a fallback is what an
+ * empty line returns. They are two fields because they are two ideas.
+ */
+
+namespace command::element;
+
+/**
+ * One line and a caret. Every index is a byte index into UTF-8, and every
+ * move lands on a scalar boundary - a caret between the two bytes of 'ä' is
+ * not a position this type can hold.
+ */
+public class TextBuffer
+{
+    public string $value;
+    public usize $caret;
+
+    constructor()
+    {
+        $this->value = '';
+        $this->caret = 0;
+    }
+
+    constructor(string $value)
+    {
+        $this->value = $value;
+        $this->caret = $value->size();
+    }
+
+    public const function empty() : bool
+    {
+        return $this->value->empty();
+    }
+
+    public const function caretColumn() : int32
+    {
+        return command::textWidth($this->value, $this->caret);
+    }
+
+    public const function columns() : int32
+    {
+        return command::textWidth($this->value);
+    }
+
+    /**
+     * The boundary before `$at`. One byte back unconditionally, then back
+     * while the byte is a continuation - which is what stops a backspace over
+     * 'ä' leaving half a scalar behind.
+     */
+    const function prevBoundary(usize $at) : usize
+    {
+        usize $i = $at;
+
+        while ($i > 0) {
+            $i = $i - 1;
+
+            if (command::utf8Lead($this->value->byte($i))) {
+                return $i;
+            }
+        }
+
+        return 0;
+    }
+
+    const function nextBoundary(usize $at) : usize
+    {
+        usize $n = $this->value->size();
+
+        if ($at >= $n) {
+            return $n;
+        }
+
+        usize $i = $at + 1;
+
+        while ($i < $n) {
+            if (command::utf8Lead($this->value->byte($i))) {
+                return $i;
+            }
+
+            $i = $i + 1;
+        }
+
+        return $n;
+    }
+
+    function splice(usize $from, usize $to) : void
+    {
+        string $head = $this->value->sub(0, $from);
+        $head->append($this->value->sub($to, $this->value->size() - $to));
+        $this->value = $head;
+    }
+
+    public function insertText(const string& $text) : void
+    {
+        if ($text->empty()) {
+            return;
+        }
+
+        if ($this->caret > $this->value->size()) {
+            die('command::element::TextBuffer: caret past the end');
+        }
+
+        usize $tail = $this->value->size() - $this->caret;
+        string $head = $this->value->sub(0, $this->caret);
+        $head->append($text);
+        $head->append($this->value->sub($this->caret, $tail));
+        $this->value = $head;
+        $this->caret = $this->caret + $text->size();
+    }
+
+    public function backspace() : bool
+    {
+        if ($this->caret == 0) {
+            return false;
+        }
+
+        usize $from = $this->prevBoundary($this->caret);
+        $this->splice($from, $this->caret);
+        $this->caret = $from;
+
+        return true;
+    }
+
+    public function deleteForward() : bool
+    {
+        if ($this->caret >= $this->value->size()) {
+            return false;
+        }
+
+        $this->splice($this->caret, $this->nextBoundary($this->caret));
+
+        return true;
+    }
+
+    public function left() : bool
+    {
+        if ($this->caret == 0) {
+            return false;
+        }
+
+        $this->caret = $this->prevBoundary($this->caret);
+
+        return true;
+    }
+
+    public function right() : bool
+    {
+        if ($this->caret >= $this->value->size()) {
+            return false;
+        }
+
+        $this->caret = $this->nextBoundary($this->caret);
+
+        return true;
+    }
+
+    public function home() : void
+    {
+        $this->caret = 0;
+    }
+
+    public function end() : void
+    {
+        $this->caret = $this->value->size();
+    }
+
+    /**
+     * Back over any spaces, then back over the word. Both scans step by
+     * boundary, so the byte handed to `bufferIsSpace` is always a lead byte - and
+     * a multi-byte lead is never a space. Simplifying either scan to
+     * `$at - 1` breaks that quietly.
+     */
+    public function killWord() : bool
+    {
+        if ($this->caret == 0) {
+            return false;
+        }
+
+        usize $at = $this->caret;
+
+        while ($at > 0) {
+            usize $prev = $this->prevBoundary($at);
+
+            if (!bufferIsSpace($this->value->byte($prev))) {
+                break;
+            }
+
+            $at = $prev;
+        }
+
+        while ($at > 0) {
+            usize $prev = $this->prevBoundary($at);
+
+            if (bufferIsSpace($this->value->byte($prev))) {
+                break;
+            }
+
+            $at = $prev;
+        }
+
+        $this->splice($at, $this->caret);
+        $this->caret = $at;
+
+        return true;
+    }
+
+    /**
+     * Readline's Ctrl-U: everything before the caret, not the whole line.
+     */
+    public function killLine() : bool
+    {
+        if ($this->caret == 0) {
+            return false;
+        }
+
+        $this->splice(0, $this->caret);
+        $this->caret = 0;
+
+        return true;
+    }
+}
+
+function bufferIsSpace(uint8 $b) : bool
+{
+    return $b == command::CH_SPACE || $b == command::CH_TAB;
+}
+
+public class Text : Step
+{
+    public command::CLIContext $ctx;
+    public string $title;
+    public string $placeholder;
+    public string $fallback;
+    public bool $must;
+    public TextBuffer $buf;
+    public int32 $scroll;
+    public LiveRegion $region;
+
+    constructor(command::CLIContext $ctx, string $title)
+    {
+        $this->seat($ctx, $title);
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    function seat(command::CLIContext $ctx, string $title) : void
+    {
+        $this->ctx = $ctx;
+        $this->title = $title;
+        $this->placeholder = '';
+        $this->fallback = '';
+        $this->must = true;
+        $this->buf = TextBuffer();
+        $this->scroll = 0;
+        $this->region = LiveRegion($ctx);
+    }
+
+    public const function head() : string
+    {
+        return $this->title;
+    }
+
+    public const function body(const StepContext& $ctx) : array<string>
+    {
+        return oneRow(drawValue($this, $ctx));
+    }
+
+    public const function summary(const StepContext& $ctx) : array<string>
+    {
+        return oneRow(command::styled(textResult($this), command::SGR_DIM, $ctx->caps->color));
+    }
+
+    /** A hint shown in the empty field. Never the answer. */
+    public function hint(string $placeholder) : void
+    {
+        $this->placeholder = $placeholder;
+    }
+
+    /** What an empty line means. */
+    public function otherwise(string $value) : void
+    {
+        $this->fallback = $value;
+    }
+
+    public function require(bool $on) : void
+    {
+        $this->must = $on;
+    }
+
+    public function ask() : string
+    {
+        $this->ctx->gap();
+
+        if ($this->region->drivable()) {
+            return askLiveText($this);
+        }
+
+        return askLineText($this);
+    }
+
+    public function frame() : string
+    {
+        return stepFrame($this->channel(), $this, StepState::active);
+    }
+
+    public function result() : string
+    {
+        return textResult($this);
+    }
+
+    public function feed(const KeyEvent& $event) : bool
+    {
+        if ($event->key == Key::enter) {
+            if (!canSubmit($this)) {
+                $this->region->paint($this->frame());
+                return false;
+            }
+
+            $this->finish();
+            return true;
+        }
+
+        applyEvent($this, $event);
+        $this->region->paint($this->frame());
+
+        return false;
+    }
+
+    public function feed(Key $key) : bool
+    {
+        return $this->feed(KeyEvent($key));
+    }
+
+    /**
+     * Type a whole string, one scalar at a time. `type('äöü')` is three
+     * keystrokes, not six - the shape a terminal would deliver.
+     */
+    public function type(const string& $text) : void
+    {
+        usize $i = 0;
+
+        while ($i < $text->size()) {
+            string $scalar = command::headScalar($text, $i);
+            $this->feed(KeyEvent(Key::text, $scalar));
+            $i = $i + $scalar->size();
+        }
+    }
+
+    function finish() : void
+    {
+        settle($this->channel(), $this, $this->region);
+    }
+}
+
+public function text(command::CLIContext $ctx, string $title) : string
+{
+    Text $p = Text($ctx, $title);
+
+    return $p->ask();
+}
+
+public function text(command::CLIContext $ctx, string $title, string $placeholder) : string
+{
+    Text $p = Text($ctx, $title);
+    $p->hint($placeholder);
+    $p->otherwise($placeholder);
+
+    return $p->ask();
+}
+
+function askLiveText(Text $p) : string
+{
+    if (!drive($p->channel(), $p, $p->region, 'command::element::Text')) {
+        return askLineText($p);
+    }
+
+    return textResult($p);
+}
+
+function askLineText(Text $p) : string
+{
+    $p->region->commit(plainQuestion($p));
+    string? $line = std::io::readline();
+    string $text = '';
+
+    if ($line != null) {
+        $text = $line ?? '';
+    }
+
+    $p->buf = TextBuffer(trimCr($text));
+
+    if (!canSubmit($p)) {
+        die('command::element::Text: that was empty, and there is no default');
+    }
+
+    $p->region->commit(stepSummary($p->channel(), $p));
+
+    return textResult($p);
+}
+
+function applyEvent(Text $p, const KeyEvent& $event) : void
+{
+    Key $key = $event->key;
+
+    if ($key == Key::text || $key == Key::space) {
+        $p->buf->insertText($event->text);
+    }
+    else if ($key == Key::backspace) {
+        $p->buf->backspace();
+    }
+    else if ($key == Key::deleteForward) {
+        $p->buf->deleteForward();
+    }
+    else if ($key == Key::left) {
+        $p->buf->left();
+    }
+    else if ($key == Key::right) {
+        $p->buf->right();
+    }
+    else if ($key == Key::home) {
+        $p->buf->home();
+    }
+    else if ($key == Key::end) {
+        $p->buf->end();
+    }
+    else if ($key == Key::killWord) {
+        $p->buf->killWord();
+    }
+    else if ($key == Key::killLine) {
+        $p->buf->killLine();
+    }
+
+    // tab is not inserted on purpose: a column here is one scalar, and a
+    // terminal expands a tab to the next multiple of eight. every width in
+    // the frame would be wrong by a variable amount
+    $p->scroll = textScroll($p->scroll, $p->buf->caretColumn(), valueRoom($p->channel()->room()));
+}
+
+function canSubmit(const Text& $p) : bool
+{
+    if (!$p->buf->empty()) {
+        return true;
+    }
+
+    if (!$p->fallback->empty()) {
+        return true;
+    }
+
+    return !$p->must;
+}
+
+function textResult(const Text& $p) : string
+{
+    if ($p->buf->empty()) {
+        return $p->fallback;
+    }
+
+    return $p->buf->value;
+}
+
+function trimCr(const string& $s) : string
+{
+    if ($s->empty()) {
+        return $s;
+    }
+
+    if ($s->byte($s->size() - 1) != command::CH_CR) {
+        return $s;
+    }
+
+    return $s->sub(0, $s->size() - 1);
+}

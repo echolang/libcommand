@@ -1,0 +1,59 @@
+/**
+ * Spinner. Non-interactive has no thread. Interactive spin is a short wait.
+ */
+
+use command::element;
+use std::thread;
+
+test spinner_noninteractive_succeed_is_a_line
+{
+    element::Spinner $s = command::CLIContext::plain()->create<element::Spinner>();
+    $s->start('fetching');
+    $s->succeed('vendored');
+
+    string $got = $s->line->ctx->captured;
+    assert(!$got->contains("\r"), 'no CR');
+    assert($got->contains('vendored'), 'final');
+    assert(!$got->contains('fetching'), 'start was silent');
+}
+
+test spinner_noninteractive_fail
+{
+    element::Spinner $s = command::CLIContext::plain()->create<element::Spinner>();
+    $s->start('fetching');
+    $s->fail('offline');
+
+    assert($s->line->ctx->captured->contains('offline'), 'final');
+}
+
+test spinner_interactive_start_paints
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Spinner $s = command::CLIContext::buffer($caps)->create<element::Spinner>();
+    $s->start('working');
+
+    assert($s->line->ctx->captured->contains('working'), 'first glyph is not delayed');
+    $s->succeed('done');
+}
+
+test spinner_interactive_paints_then_commits
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Spinner $s = command::CLIContext::buffer($caps)->create<element::Spinner>();
+    $s->start('working');
+    thread::sleep(200);
+    $s->succeed('done');
+
+    string $got = $s->line->ctx->captured;
+    assert($got->contains("\r\x1b[K"), 'rewrote');
+    assert($got->contains('done'), 'final');
+}
+
+test spin_helper_returns_the_work
+{
+    int32 $n = element::spin(command::CLIContext::plain(), 'n', function() : int32 {
+        return 7;
+    });
+
+    assert($n == 7, 'value');
+}

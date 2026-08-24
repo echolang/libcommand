@@ -1,0 +1,293 @@
+/**
+ * A typed line: scalar-wise editing, the caret, the placeholder, the window.
+ */
+
+use command;
+use command::element;
+
+test buffer_inserts_at_the_caret
+{
+    element::TextBuffer $b = element::TextBuffer();
+    $b->insertText('hello');
+    $b->home();
+    $b->insertText('say ');
+
+    assert($b->value == 'say hello', 'inserted at the front');
+    assert($b->caret == 4, 'caret after the insert');
+}
+
+test buffer_backspace_takes_a_whole_scalar
+{
+    element::TextBuffer $b = element::TextBuffer();
+    $b->insertText("h\xc3\xa4");
+
+    assert($b->caret == 3, 'three bytes, two scalars');
+
+    $b->backspace();
+
+    assert($b->value == 'h', 'the scalar went, not a byte');
+    assert($b->caret == 1, 'caret landed on the boundary');
+}
+
+test buffer_left_never_splits_a_scalar
+{
+    element::TextBuffer $b = element::TextBuffer("\xc3\xa4x");
+    $b->left();
+
+    assert($b->caret == 2, 'past the two-byte scalar');
+
+    $b->left();
+
+    assert($b->caret == 0, 'and over it in one step');
+}
+
+test buffer_delete_forward_takes_a_whole_scalar
+{
+    element::TextBuffer $b = element::TextBuffer("\xc3\xa4x");
+    $b->home();
+    $b->deleteForward();
+
+    assert($b->value == 'x', 'both bytes went');
+    assert($b->caret == 0, 'the caret stayed put');
+}
+
+test buffer_edges_refuse_to_move
+{
+    element::TextBuffer $b = element::TextBuffer('ab');
+    $b->end();
+
+    assert(!$b->right(), 'nothing to the right');
+    assert(!$b->deleteForward(), 'nothing to delete');
+
+    $b->home();
+
+    assert(!$b->left(), 'nothing to the left');
+    assert(!$b->backspace(), 'nothing to erase');
+}
+
+test buffer_kill_word_stops_at_the_previous_space
+{
+    element::TextBuffer $b = element::TextBuffer('one two three');
+    $b->killWord();
+
+    assert($b->value == 'one two ', 'the last word went');
+
+    $b->killWord();
+
+    assert($b->value == 'one ', 'and the one before it');
+}
+
+test buffer_kill_word_skips_trailing_spaces
+{
+    element::TextBuffer $b = element::TextBuffer('one two   ');
+    $b->killWord();
+
+    assert($b->value == 'one ', 'the spaces and the word');
+}
+
+test buffer_kill_line_keeps_what_is_after_the_caret
+{
+    element::TextBuffer $b = element::TextBuffer('one two');
+    $b->left();
+    $b->left();
+    $b->left();
+    $b->killLine();
+
+    assert($b->value == 'two', 'everything before the caret went');
+    assert($b->caret == 0, 'caret at the front');
+}
+
+test prompt_types_a_line
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->type('./my-app');
+
+    assert($p->result() == './my-app', 'the whole line');
+}
+
+test prompt_types_multibyte_one_scalar_at_a_time
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->type("h\xc3\xa4llo");
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::backspace);
+
+    assert($p->result() == 'hllo', 'the scalar went, not a byte');
+}
+
+test prompt_draws_a_caret_where_the_cursor_is
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 40, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->type('ab');
+    $p->feed(element::Key::left);
+
+    string $frame = $p->frame();
+    string $want = command::styled('b', command::SGR_REVERSE, true);
+
+    assert($frame->contains($want), 'the caret inverts the scalar it sits on');
+    assert(command::stripSgr($frame)->contains('ab'), 'and costs no column');
+}
+
+test prompt_caret_parks_past_the_end
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 40, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->type('ab');
+
+    string $want = command::styled(' ', command::SGR_REVERSE, true);
+
+    assert($p->frame()->contains($want), 'a cell of its own at the end');
+}
+
+test prompt_shows_a_placeholder_while_empty
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 40, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->hint('./my-app');
+
+    assert(command::stripSgr($p->frame())->contains('./my-app'), 'the hint is drawn');
+    assert($p->frame()->contains(command::SGR_DIM), 'and dimmed');
+
+    $p->type('x');
+
+    assert(!command::stripSgr($p->frame())->contains('./my-app'), 'and gone once typing starts');
+}
+
+test prompt_placeholder_is_never_the_answer
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->hint('./my-app');
+    $p->require(false);
+
+    assert($p->result() == '', 'a hint is not a value');
+}
+
+test prompt_fallback_is_the_answer_when_empty
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->otherwise('./my-app');
+
+    assert($p->result() == './my-app', 'the default stands in');
+
+    $p->type('x');
+
+    assert($p->result() == 'x', 'until something is typed');
+}
+
+test text_three_arg_is_the_fallback
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->hint('./my-app');
+    $p->otherwise('./my-app');
+
+    assert($p->feed(element::Key::enter), 'empty enter is the default');
+    assert($p->result() == './my-app', 'the third argument is otherwise, not only a hint');
+}
+
+test prompt_refuses_an_empty_required_answer
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+
+    assert(!$p->feed(element::Key::enter), 'enter does not submit');
+
+    $p->type('x');
+
+    assert($p->feed(element::Key::enter), 'and does once there is a value');
+}
+
+test prompt_never_reaches_the_last_column
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 20, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->type('abcdefghijklmnopqrstuvwxyz0123456789');
+
+    array<string> $rows = str::split($p->frame(), "\n")->owned();
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        assert(command::textWidth($rows[$i]) < 20, 'a row that fills the width would wrap');
+        $i = $i + 1;
+    }
+}
+
+test prompt_window_follows_the_caret
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 20, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->type('abcdefghijklmnopqrstuvwxyz');
+
+    assert($p->frame()->contains('z'), 'the caret end is visible');
+    assert(!$p->frame()->contains('abc'), 'the far end has scrolled off');
+
+    $p->feed(element::Key::home);
+
+    assert($p->frame()->contains('abc'), 'and comes back');
+    assert($p->scroll == 0, 'the window is back at the front');
+}
+
+test prompt_window_holds_still_while_the_caret_is_inside_it
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 20, true);
+    element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
+    $p->type('abcdefghijklmnopqrstuvwxyz');
+
+    int32 $was = $p->scroll;
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::left);
+
+    assert($p->scroll == $was, 'the text does not slide under the user');
+}
+
+test prompt_joins_a_run_opened_after_create
+{
+    command::CLIContext $ctx = .buffer(promptCaps());
+    element::Text $p = $ctx->create<element::Text>('Where?');
+    $ctx->beginStepper('x');
+    $p->type('x');
+
+    assert($p->frame()->starts("◆  Where?"), 'the live channel, not a snapshot');
+}
+
+test prompt_in_a_session_hangs_off_the_bar
+{
+    command::TerminalCapabilities $caps = promptCaps();
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Text $p = $ctx->create<element::Text>('Where?');
+    $p->type('x');
+
+    assert($p->frame()->starts("◆  Where?\n│  "), 'a step and a bar row');
+}
+
+test prompt_on_its_own_keeps_the_old_indent
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->type('x');
+
+    assert($p->frame()->starts("  Where?\n  "), 'two spaces, no bar');
+}
+
+test prompt_summary_is_the_answer_under_the_title
+{
+    command::TerminalCapabilities $caps = promptCaps();
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Text $p = $ctx->create<element::Text>('Where?');
+    $p->type('./my-app');
+    $p->feed(element::Key::enter);
+
+    assert($p->region->ctx->captured->contains("◇  Where?\n│  ./my-app"), 'title, then the answer');
+}
+
+test prompt_tab_is_not_inserted
+{
+    element::Text $p = promptCtx()->create<element::Text>('Where?');
+    $p->type('a');
+    $p->feed(element::Key::tab);
+    $p->type('b');
+
+    assert($p->result() == 'ab', 'a tab would make every width a guess');
+}

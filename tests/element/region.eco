@@ -1,0 +1,118 @@
+/**
+ * LiveRegion: cursor-up + erase-down. Non-interactive is commit-only.
+ */
+
+use command::element;
+
+test region_noninteractive_paint_is_silent
+{
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
+    $r->paint("a\nb");
+    $r->erase();
+
+    assert($r->ctx->captured == '', 'no rewrite in a log');
+}
+
+test region_noninteractive_commit_is_the_frame
+{
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
+    $r->commit("a\nb");
+
+    assert($r->ctx->captured == "a\nb\n", 'full frame');
+}
+
+test region_interactive_first_paint_has_no_up
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->paint("a\nb\nc");
+
+    assert(!$r->ctx->captured->contains("A"), 'nothing to climb over on the first paint');
+    assert($r->ctx->captured->ends("a\nb\nc"), 'frame');
+    assert($r->height == 3, 'three rows');
+}
+
+test region_interactive_second_paint_climbs
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->paint("a\nb\nc");
+    $r->ctx->captured = '';
+    $r->paint("x\ny");
+
+    assert($r->ctx->captured->starts("\x1b[2A\r\x1b[J"), 'up then erase');
+    assert($r->ctx->captured->contains("x\ny"), 'new frame');
+    assert($r->height == 2, 'shorter');
+}
+
+test region_interactive_erase_climbs
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->paint("a\nb");
+    $r->ctx->captured = '';
+    $r->erase();
+
+    assert($r->ctx->captured->starts("\x1b[1A\r\x1b[J"), 'up one, erase');
+    assert($r->height == 0, 'gone');
+}
+
+test region_interactive_commit_ends_a_line
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->commit('done');
+
+    assert($r->ctx->captured->contains("done\n"), 'newline');
+    assert($r->height == 0, 'left the region');
+}
+
+/**
+ * A widget paints its caret into the frame, so the terminal's own cursor
+ * would be a second one for as long as the frame is up.
+ */
+test region_hides_the_terminal_cursor_while_a_frame_is_up
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->paint("a\nb");
+
+    assert($r->ctx->captured->starts(command::CURSOR_HIDE), 'gone before the first frame');
+    assert(!$r->ctx->captured->contains(command::CURSOR_SHOW), 'and stays gone');
+
+    $r->ctx->captured = '';
+    $r->paint("c\nd");
+
+    assert(!$r->ctx->captured->contains(command::CURSOR_HIDE), 'hidden once, not per paint');
+
+    $r->ctx->captured = '';
+    $r->commit('done');
+
+    assert($r->ctx->captured->ends(command::CURSOR_SHOW), 'back when the region is left');
+    assert(!$r->hidden, 'and the region knows it');
+}
+
+test region_erase_brings_the_cursor_back
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
+    $r->paint("a\nb");
+    $r->ctx->captured = '';
+    $r->erase();
+
+    assert($r->ctx->captured->ends(command::CURSOR_SHOW), 'an erased region leaves no cursor behind');
+
+    $r->ctx->captured = '';
+    $r->erase();
+
+    assert($r->ctx->captured == '', 'and a second erase says nothing');
+}
+
+test region_noninteractive_never_touches_the_cursor
+{
+    element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
+    $r->paint("a\nb");
+    $r->commit('done');
+
+    assert(!$r->ctx->captured->contains("\x1b["), 'a log gets the frame and nothing else');
+}

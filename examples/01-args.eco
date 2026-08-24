@@ -1,0 +1,41 @@
+// the smallest real program: one positional, one required --file, the four-branch driver.
+//
+//   echoc run -m . examples/01-args.eco -- --help
+//   echoc run -m . examples/01-args.eco -- --file notes.txt TODO
+//   echoc run -m . examples/01-args.eco -- TODO
+
+use command;
+use std::env;
+use std::io;
+
+command::Command $app = command::Command('search', '0.1.0', 'find a pattern');
+$app->positional('<pattern>', 'the pattern', 'A regular expression.', 1, 1, '');
+command::Arg $file = $app->arg('file', 'f', '<path>', 'read from this file');
+$app->require($file);
+
+$r = $app->parse(env::argv());
+
+if ($r->error != null) {
+    command::Error $e = $r->error ?? .noCommand;
+    command::CLIContext $err = .from($r->parsed, $app, .stderr);
+    $err->write(command::renderError($e, $app, $r->parsed, $err));
+    env::exit(1);
+}
+
+$parsed = $r->parsed;
+
+if ($parsed->wantsVersion) {
+    io::print(command::renderVersion($app));
+    env::exit(0);
+}
+
+if ($parsed->wantsHelp) {
+    command::CLIContext $help = .from($parsed, $app, .stdout);
+    $help->write(command::renderHelp($app, $parsed, $help));
+    env::exit(0);
+}
+
+// handles, not strings: value() cannot silently miss
+echo "file: {$parsed->value($file)}";
+echo "pattern: {$parsed->positionals[0]}";
+echo "file stated: {$parsed->stated($file)}";

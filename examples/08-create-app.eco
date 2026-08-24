@@ -1,0 +1,87 @@
+// a scaffolder: argv first, then a session of prompts, a spinner, a summary table.
+// --yes skips the confirm. a <dir> positional skips the "where" prompt.
+//
+//   echoc run -m . examples/08-create-app.eco
+//   printf '1\n1\n' | echoc run -m . examples/08-create-app.eco -- --yes my-app
+
+use command;
+use command::element;
+use std::env;
+use std::io;
+use std::thread;
+
+command::Command $app = command::Command('create-app', '0.1.0', 'scaffold a project');
+$app->positional('<dir>', 'where to create it', 'A directory name.', 0, 1, '');
+command::Flag $yes = $app->flag('yes', 'y', 'skip the confirm');
+
+$r = $app->parse(env::argv());
+
+if ($r->error != null) {
+    command::Error $e = $r->error ?? .noCommand;
+    command::CLIContext $err = .from($r->parsed, $app, .stderr);
+    $err->write(command::renderError($e, $app, $r->parsed, $err));
+    env::exit(1);
+}
+
+$parsed = $r->parsed;
+
+if ($parsed->wantsVersion) {
+    io::print(command::renderVersion($app));
+    env::exit(0);
+}
+
+if ($parsed->wantsHelp) {
+    command::CLIContext $help = .from($parsed, $app, .stdout);
+    $help->write(command::renderHelp($app, $parsed, $help));
+    env::exit(0);
+}
+
+command::CLIContext $ctx = .from($parsed, $app, .stderr);
+$ctx->beginStepper('create-app');
+
+$dir = './my-app';
+
+if (!$parsed->positionals->empty()) {
+    $dir = $parsed->positionals[0];
+}
+else {
+    $where = $ctx->create<element::Text>('Where should we create it?');
+    $where->hint('./my-app');
+    $where->otherwise('./my-app');
+    $dir = $where->ask();
+}
+
+$types = ['TypeScript', 'JavaScript', 'CoffeeScript'];
+$type = element::select($ctx, 'Pick a project type', $types);
+
+$q = $ctx->create<element::Select>('Which features?', element::SelectKind::checks);
+$q->choice('Logging');
+$q->choice('Caching');
+$q->choice('Compression');
+$q->pick('Logging');
+$on = $q->ask();
+
+if (!$parsed->stated($yes)) {
+    $go = element::confirm($ctx, 'Continue?');
+
+    if (!$go) {
+        $ctx->endStepper('Nothing was written.');
+        env::exit(0);
+    }
+}
+
+$spin = $ctx->create<element::Spinner>();
+$spin->start('writing files');
+thread::sleep(400);
+$spin->succeed('wrote 12 files');
+
+$ctx->endStepper('Done');
+
+$features = str::join($on, ', ');
+$t = $ctx->create<element::Table>();
+$t->column('Setting');
+$t->column('Value');
+$t->row(['dir', $dir]);
+$t->row(['type', $type[0]]);
+$t->row(['features', $features]);
+$t->display();

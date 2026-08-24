@@ -1,0 +1,17 @@
+/**
+ * The C symbols in c/posix.c and c/win32.c. One block, declared once - a C
+ * symbol may only appear once per module.
+ *
+ * isatty and columns live on std::io::stream. This binding is the TUI seam:
+ * raw mode, one-byte reads, and the cursor-hidden flag the Ctrl-C path needs.
+ */
+
+namespace command;
+
+internal extern {
+    function command_raw_enter() : int32;
+    function command_raw_leave() : int32;
+    function command_cursor_hidden(int32 $on) : int32;
+    function command_read_byte() : int32;
+    function command_read_byte_wait(int32 $tenths) : int32;
+}

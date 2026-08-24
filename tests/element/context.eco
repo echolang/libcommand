@@ -1,0 +1,91 @@
+/**
+ * The factory: create<T> forwards into T's constructor with the context first.
+ */
+
+use command;
+use command::element;
+
+test context_create_text_and_spinner
+{
+    command::CLIContext $ctx = .plain();
+    element::Text $name = $ctx->create<element::Text>('What is your name?');
+    element::Spinner $spin = $ctx->create<element::Spinner>();
+
+    assert($name->title == 'What is your name?', 'title lands');
+    assert(!$spin->line->ctx->toStream, 'a plain context captures');
+}
+
+test context_create_select_with_kind
+{
+    command::CLIContext $ctx = .plain();
+    element::Select $q = $ctx->create<element::Select>('Which?', element::SelectKind::checks);
+    $q->choice('Logging');
+
+    assert($q->kind == element::SelectKind::checks, 'kind forwarded');
+    assert($q->items->count() == 1, 'one choice');
+}
+
+test context_create_table
+{
+    command::CLIContext $ctx = .plain();
+    element::Table $t = $ctx->create<element::Table>();
+    $t->column('A');
+    array<string> $row = array<string>();
+    $row[] = 'x';
+    $t->row($row);
+
+    assert($t->render()->contains('A'), 'renders from stored caps');
+}
+
+test context_create_joins_the_run
+{
+    command::CLIContext $ctx = .buffer(
+        command::TerminalCapabilities(false, true, 40, true)
+    );
+    $ctx->beginStepper('create-app');
+    element::Spinner $spin = $ctx->create<element::Spinner>();
+
+    assert($spin->channel()->gutter, 'the run stepper has a bar');
+    assert($ctx->captured->starts("┌  create-app\n"), 'beginStepper opened the run');
+}
+
+test context_create_select_is_the_object
+{
+    command::CLIContext $ctx = .plain();
+    element::Select $q = $ctx->create<element::Select>('Which?', element::SelectKind::checks);
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->pick('Logging');
+
+    assert($q->items->count() == 2, 'choices landed on the created select');
+    assert($q->result()[0] == 'Logging', 'pick landed');
+}
+
+test table_display_writes_through_the_context
+{
+    command::CLIContext $ctx = .plain();
+    element::Table $t = $ctx->create<element::Table>();
+    array<string> $heads = array<string>();
+    $heads[] = 'A';
+    $t->columns($heads);
+    array<string> $row = array<string>();
+    $row[] = 'x';
+    $t->row($row);
+    $t->display();
+
+    assert($t->captured->contains('A'), 'display captured on the widget');
+}
+
+test table_columns_adds_each_header
+{
+    command::CLIContext $ctx = .plain();
+    element::Table $t = $ctx->create<element::Table>();
+    array<string> $heads = array<string>();
+    $heads[] = 'Name';
+    $heads[] = 'Status';
+    $t->columns($heads);
+    string $got = $t->render();
+
+    assert($got->contains('Name'), 'first header');
+    assert($got->contains('Status'), 'second header');
+}

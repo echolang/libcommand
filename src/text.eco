@@ -1,0 +1,162 @@
+/**
+ * ASCII bytes the layout and terminal walkers compare against, and the
+ * UTF-8 column walk. A column here is one Unicode scalar (lead byte).
+ * Combining marks, CJK width, and emoji are out of scope: every scalar
+ * is width 1.
+ */
+
+namespace command;
+
+public const uint8 CH_SPACE = 32;
+public const uint8 CH_LF = 10;
+public const uint8 CH_CR = 13;
+public const uint8 CH_TAB = 9;
+public const uint8 CH_ESC = 27;
+public const uint8 CH_BS = 8;
+public const uint8 CH_DEL = 127;
+public const uint8 CH_COMMA = 44;
+public const uint8 CH_LBRK = 91;
+public const uint8 CH_m = 109;
+public const uint8 CH_ZERO = 48;
+public const uint8 CH_NINE = 57;
+public const uint8 CH_A = 65;
+public const uint8 CH_B = 66;
+public const uint8 CH_C = 67;
+public const uint8 CH_D = 68;
+public const uint8 CH_F = 70;
+public const uint8 CH_H = 72;
+public const uint8 CH_O = 79;
+public const uint8 CH_SEMI = 59;
+public const uint8 CH_TILDE = 126;
+
+/**
+ * Raw mode clears ICANON, so VERASE, VKILL and VWERASE stop being the tty's
+ * business and arrive as these bytes. ISIG stays set, so Ctrl-C is never one
+ * of them: it is still a signal, and it still kills the program.
+ */
+public const uint8 CH_CTRL_A = 1;
+public const uint8 CH_CTRL_E = 5;
+public const uint8 CH_CTRL_U = 21;
+public const uint8 CH_CTRL_W = 23;
+
+function i32Of(usize $n) : int32
+{
+    int32 $i = $n;
+
+    return $i;
+}
+
+function usizeOf(int32 $n) : usize
+{
+    if ($n <= 0) {
+        return 0;
+    }
+
+    usize $u = $n;
+
+    return $u;
+}
+
+function utf8Lead(uint8 $b) : bool
+{
+    int32 $wide = $b;
+
+    if (($wide & 192) == 128) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * How many bytes the scalar starting with this lead byte occupies.
+ *
+ * `utf8Lead` answers whether a byte is a boundary; this answers how far the
+ * next one is. A continuation byte and an invalid lead both answer 1: consume
+ * the byte as one opaque unit rather than wait for bytes that never arrive.
+ */
+function utf8Len(uint8 $lead) : usize
+{
+    int32 $wide = $lead;
+
+    if (($wide & 128) == 0) {
+        return 1;
+    }
+
+    if (($wide & 224) == 192) {
+        return 2;
+    }
+
+    if (($wide & 240) == 224) {
+        return 3;
+    }
+
+    if (($wide & 248) == 240) {
+        return 4;
+    }
+
+    return 1;
+}
+
+/**
+ * The scalar starting at `$at`, as its own string.
+ *
+ * `utf8Len` says how far the next boundary is; this hands back the bytes in
+ * between, clamped to what is actually there. A truncated scalar at the end of
+ * a buffer comes back as the bytes that arrived rather than reading past them.
+ */
+function headScalar(const string& $s, usize $at) : string
+{
+    if ($at >= $s->size()) {
+        return '';
+    }
+
+    usize $n = utf8Len($s->byte($at));
+
+    if ($at + $n > $s->size()) {
+        $n = $s->size() - $at;
+    }
+
+    return $s->sub($at, $n);
+}
+
+function headScalar(const string& $s) : string
+{
+    return headScalar($s, 0);
+}
+
+function bytesForColumns(const string& $s, int32 $columns) : usize
+{
+    return bytesForColumns($s, 0, $columns);
+}
+
+/**
+ * The byte index `$columns` columns past `$from`, which must be a boundary.
+ *
+ * Taking a start offset rather than a substring is what keeps a sliding window
+ * from copying the whole tail of the line it is a window into - the caller
+ * slices once, at the end, and only the part it draws.
+ */
+function bytesForColumns(const string& $s, usize $from, int32 $columns) : usize
+{
+    if ($columns <= 0) {
+        return $from;
+    }
+
+    usize $i = $from;
+    int32 $col = 0;
+
+    while ($i < $s->size()) {
+        if (utf8Lead($s->byte($i))) {
+            if ($col >= $columns) {
+                return $i;
+            }
+
+            $col = $col + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $s->size();
+}

@@ -1,0 +1,434 @@
+/**
+ * Select: radio, checks, paging, numbered fallback. Keys are injected.
+ */
+
+use command::element;
+
+function fruits(element::Select $q) : void
+{
+    $q->choice('Apple');
+    $q->choice('Banana');
+    $q->choice('Orange');
+}
+
+test select_radio_default_is_first
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+
+    array<string> $got = $q->result();
+    assert($got->count() == 1, 'one');
+    assert($got[0] == 'Apple', 'first');
+}
+
+test select_radio_down_then_enter
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('fruit');
+    fruits($q);
+    $q->feed(element::Key::down);
+    bool $done = $q->feed(element::Key::enter);
+
+    assert($done, 'confirmed');
+    array<string> $got = $q->result();
+    assert($got[0] == 'Banana', 'second');
+    assert($q->region->ctx->captured->contains('fruit'), 'title');
+    assert($q->region->ctx->captured->contains('Banana'), 'summary');
+}
+
+test select_radio_pick_moves_the_cursor
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->pick('Orange');
+
+    array<string> $got = $q->result();
+    assert($got[0] == 'Orange', 'picked');
+}
+
+test select_radio_wrap
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->wrap(true);
+    $q->feed(element::Key::up);
+
+    array<string> $got = $q->result();
+    assert($got[0] == 'Orange', 'wrapped');
+}
+
+test select_radio_no_wrap_stays
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->feed(element::Key::up);
+
+    array<string> $got = $q->result();
+    assert($got[0] == 'Apple', 'stayed');
+}
+
+test select_radio_home_end
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->feed(element::Key::end);
+    assert($q->result()[0] == 'Orange', 'end');
+    $q->feed(element::Key::home);
+    assert($q->result()[0] == 'Apple', 'home');
+}
+
+test select_radio_ascii_glyphs
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    string $frame = $q->frame();
+
+    assert($frame->contains('(*) '), 'on');
+    assert($frame->contains('( ) '), 'off');
+    assert($frame->contains('> '), 'pointer');
+    assert($frame->contains('Apple'), 'label');
+}
+
+test select_radio_unicode_glyphs
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 80, false);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('fruit');
+    fruits($q);
+    string $frame = $q->frame();
+
+    assert($frame->contains('● '), 'on');
+    assert($frame->contains('○ '), 'off');
+    assert($frame->contains('❯ '), 'pointer');
+}
+
+test select_radio_colour_on_focus
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, false, 80, false);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('fruit');
+    fruits($q);
+    string $frame = $q->frame();
+
+    assert($frame->contains(command::SGR_INFO), 'info');
+}
+
+test select_page_window_follows_cursor
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('n');
+    $q->pageSize(2);
+    $q->choice('a');
+    $q->choice('b');
+    $q->choice('c');
+    $q->choice('d');
+
+    // the glyph is part of every needle: the footer is prose, and a bare 'c'
+    // matches the 'c' in 'confirm'
+    string $first = $q->frame();
+    assert($first->contains(') a'), 'a');
+    assert($first->contains(') b'), 'b');
+    assert(!$first->contains(') c'), 'not c');
+    assert($first->contains('to navigate'), 'the keys are spelled out');
+
+    $q->feed(element::Key::down);
+    $q->feed(element::Key::down);
+    string $moved = $q->frame();
+    assert($moved->contains(') b'), 'b still');
+    assert($moved->contains(') c'), 'c in view');
+    assert(!$moved->contains("\n  > (*) a"), 'a scrolled out');
+}
+
+test select_checks_space_toggles
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->choice('Compression');
+    $q->feed(element::Key::space);
+    $q->feed(element::Key::down);
+    $q->feed(element::Key::down);
+    $q->feed(element::Key::space);
+    bool $done = $q->feed(element::Key::enter);
+
+    assert($done, 'confirmed');
+    array<string> $got = $q->result();
+    assert($got->count() == 2, 'two');
+    assert($got[0] == 'Logging', 'first');
+    assert($got[1] == 'Compression', 'third');
+}
+
+test select_checks_require_blocks_empty
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->choice('Caching');
+    bool $done = $q->feed(element::Key::enter);
+
+    assert(!$done, 'blocked');
+    assert($q->result()->empty(), 'nothing');
+}
+
+test select_checks_empty_ok
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->require(false);
+    bool $done = $q->feed(element::Key::enter);
+
+    assert($done, 'allowed');
+    assert($q->result()->empty(), 'none');
+    assert($q->region->ctx->captured->contains('(none)'), 'summary');
+}
+
+test select_checks_pick
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->pick('Caching');
+
+    array<string> $got = $q->result();
+    assert($got->count() == 1, 'one');
+    assert($got[0] == 'Caching', 'prechecked');
+}
+
+test select_checks_ascii_glyphs
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->pick('Logging');
+    string $frame = $q->frame();
+
+    assert($frame->contains('[x] '), 'on');
+    assert($frame->contains('up/down to navigate - Space: select - Enter: confirm'), 'hint');
+}
+
+test select_numbered_radio
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+
+    assert($q->numbered()->contains('1) Apple'), 'one');
+    assert($q->numbered()->contains('2) Banana'), 'two');
+
+    array<string>? $got = $q->tryAnswer('2');
+    assert($got != null, 'ok');
+    array<string> $xs = $got ?? array<string>();
+    assert($xs[0] == 'Banana', 'second');
+    assert($q->result()[0] == 'Banana', 'cursor follows');
+}
+
+test select_numbered_radio_empty_with_pick
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->pick('Orange');
+
+    array<string>? $got = $q->tryAnswer('');
+    assert($got != null, 'default');
+    array<string> $xs = $got ?? array<string>();
+    assert($xs[0] == 'Orange', 'picked');
+}
+
+test select_numbered_radio_empty_without_pick
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+
+    array<string>? $got = $q->tryAnswer('');
+    assert($got == null, 'refused');
+}
+
+test select_numbered_radio_out_of_range
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+
+    assert($q->tryAnswer('0') == null, 'zero');
+    assert($q->tryAnswer('4') == null, 'high');
+    assert($q->tryAnswer('nope') == null, 'garbage');
+}
+
+test select_numbered_checks
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->choice('Compression');
+
+    array<string>? $got = $q->tryAnswer('1, 3');
+    assert($got != null, 'ok');
+    array<string> $xs = $got ?? array<string>();
+    assert($xs->count() == 2, 'two');
+    assert($xs[0] == 'Logging', 'first');
+    assert($xs[1] == 'Compression', 'third');
+}
+
+test select_numbered_checks_spaces
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->choice('Caching');
+
+    array<string>? $got = $q->tryAnswer('1 2');
+    assert($got != null, 'ok');
+    array<string> $xs = $got ?? array<string>();
+    assert($xs->count() == 2, 'both');
+}
+
+test select_numbered_checks_empty_ok
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>(
+        'feat',
+        element::SelectKind::checks
+    );
+    $q->choice('Logging');
+    $q->require(false);
+
+    array<string>? $got = $q->tryAnswer('');
+    assert($got != null, 'ok');
+    array<string> $xs = $got ?? array<string>();
+    assert($xs->empty(), 'none');
+}
+
+test select_space_ignored_on_radio
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
+    fruits($q);
+    $q->feed(element::Key::space);
+
+    assert($q->result()[0] == 'Apple', 'unchanged');
+}
+
+test select_page_down
+{
+    element::Select $q = command::CLIContext::plain()->create<element::Select>('n');
+    $q->pageSize(2);
+    $q->choice('a');
+    $q->choice('b');
+    $q->choice('c');
+    $q->choice('d');
+    $q->feed(element::Key::pageDown);
+
+    assert($q->result()[0] == 'c', 'jumped');
+}
+
+test select_in_a_session_hangs_off_the_bar
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 60, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Select $q = $ctx->create<element::Select>('Pick one', element::SelectKind::radio);
+    $q->choice('a');
+    $q->choice('b');
+
+    string $want = "◆  Pick one\n│  ● a\n│  ○ b\n│  ↑/↓ to navigate • Enter: confirm\n└";
+
+    assert($q->frame() == $want, 'a step, two bar rows, the keys, and the cap');
+}
+
+test select_in_a_session_drops_the_pointer
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 60, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Select $q = $ctx->create<element::Select>('Pick one', element::SelectKind::radio);
+    $q->choice('a');
+
+    assert(!$q->frame()->contains('❯'), 'colour marks focus in a run');
+}
+
+test select_on_its_own_keeps_the_pointer
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 60, true);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('Pick one');
+    $q->choice('a');
+
+    // no bar and no cap off-session; the keys are a body row either way
+    assert(
+        $q->frame() == "  Pick one\n  ❯ ● a\n  ↑/↓ to navigate • Enter: confirm",
+        'the old shape, still two spaces'
+    );
+}
+
+test select_in_a_session_dims_what_is_not_focused
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 60, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Select $q = $ctx->create<element::Select>('Pick one', element::SelectKind::radio);
+    $q->choice('a');
+    $q->choice('b');
+
+    array<string> $rows = str::split($q->frame(), "\n")->owned();
+
+    assert(!$rows[1]->contains(command::SGR_DIM), 'the focused row is plain');
+    assert($rows[1]->contains(command::SGR_SUCCESS), 'and its marker is the answer');
+    assert($rows[2]->contains(command::SGR_DIM), 'the rest is dimmed');
+}
+
+test select_in_a_session_keeps_a_tick_lit_off_the_cursor
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, true, 60, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Select $q = $ctx->create<element::Select>('Which?', element::SelectKind::checks);
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->pick('Logging');
+    $q->feed(element::Key::down);
+
+    array<string> $rows = str::split($q->frame(), "\n")->owned();
+
+    assert($rows[1]->contains(command::SGR_SUCCESS), 'a ticked box stays green');
+    assert($rows[1]->contains(command::SGR_DIM), 'and its label still dims off the cursor');
+    assert($rows[2]->contains(command::SGR_SECONDARY), 'an empty box under the cursor is a place');
+    assert(!$rows[2]->contains(command::SGR_SUCCESS), 'not an answer');
+}
+
+test select_summary_is_two_rows_in_a_session
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 60, true);
+    command::CLIContext $ctx = .buffer($caps);
+    $ctx->beginStepper('x');
+    element::Select $q = $ctx->create<element::Select>('Which?', element::SelectKind::checks);
+    $q->choice('Logging');
+    $q->choice('Caching');
+    $q->pick('Logging');
+    $q->pick('Caching');
+    $q->feed(element::Key::enter);
+
+    assert($q->region->ctx->captured->contains("◇  Which?\n│  Logging, Caching"), 'title, then the answer');
+}
+
+test select_summary_is_one_row_on_its_own
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 60, true);
+    element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('Which?', element::SelectKind::checks);
+    $q->choice('Logging');
+    $q->pick('Logging');
+    $q->feed(element::Key::enter);
+
+    assert($q->region->ctx->captured->contains('  Which?  Logging'), 'one line, as before');
+}

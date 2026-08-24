@@ -1,0 +1,315 @@
+/**
+ * Glyphs. Colour is a TerminalCapabilities question and does not live here:
+ * a CI job can render SGR but not box drawing, and a golden can pin unicode
+ * layout with colour off.
+ */
+
+namespace command;
+
+public struct HelpTheme
+{
+    public string $bar;
+    public string $rule;
+    public bool $decorate;
+
+    constructor(string $bar, string $rule, bool $decorate)
+    {
+        $this->bar = $bar;
+        $this->rule = $rule;
+        $this->decorate = $decorate;
+    }
+}
+
+public struct TreeTheme
+{
+    public string $branch;
+    public string $last;
+    public string $pipe;
+    public string $blank;
+
+    constructor(string $branch, string $last, string $pipe, string $blank)
+    {
+        $this->branch = $branch;
+        $this->last = $last;
+        $this->pipe = $pipe;
+        $this->blank = $blank;
+    }
+}
+
+public struct BorderTheme
+{
+    public string $h;
+    public string $v;
+    public string $x;
+    public string $tl;
+    public string $tr;
+    public string $bl;
+    public string $br;
+    public string $ml;
+    public string $mr;
+    public string $mt;
+    public string $mb;
+
+    constructor(
+        string $h,
+        string $v,
+        string $x,
+        string $tl,
+        string $tr,
+        string $bl,
+        string $br,
+        string $ml,
+        string $mr,
+        string $mt,
+        string $mb
+    )
+    {
+        $this->h = $h;
+        $this->v = $v;
+        $this->x = $x;
+        $this->tl = $tl;
+        $this->tr = $tr;
+        $this->bl = $bl;
+        $this->br = $br;
+        $this->ml = $ml;
+        $this->mr = $mr;
+        $this->mt = $mt;
+        $this->mb = $mb;
+    }
+}
+
+public struct ProgressTheme
+{
+    public string $cell;
+
+    constructor(string $cell)
+    {
+        $this->cell = $cell;
+    }
+}
+
+/**
+ * Eliding is a property of the terminal, not of a widget, so there is no
+ * ellipsis here: `fitHead` takes the one on `PromptTheme` and every row in
+ * the library is cut by a Stepper.
+ */
+public struct SpinnerTheme
+{
+    public string $done;
+    public string $failed;
+    public array<string> $spinner;
+
+    constructor(string $done, string $failed, array<string> $spinner)
+    {
+        $this->done = $done;
+        $this->failed = $failed;
+        $this->spinner = $spinner;
+    }
+
+    /**
+     * The glyph animation frame `$frame` shows. Cycles, and a frame counter
+     * that has wrapped negative still lands inside the table.
+     */
+    public const function frameAt(int32 $frame) : string
+    {
+        usize $n = $this->spinner->count();
+
+        if ($n == 0) {
+            return '';
+        }
+
+        int32 $mod = i32Of($n);
+        int32 $i = $frame % $mod;
+
+        if ($i < 0) {
+            $i = $i + $mod;
+        }
+
+        return $this->spinner[usizeOf($i)];
+    }
+
+    /** The glyph a finished run settles on. Pairs with `outcomeSgr`. */
+    public const function outcome(bool $ok) : string
+    {
+        if ($ok) {
+            return $this->done;
+        }
+
+        return $this->failed;
+    }
+}
+
+/**
+ * The colour a finished run settles on. Lives beside `SpinnerTheme::outcome`
+ * because the glyph and the colour are one decision - split them and a theme
+ * change lands on the spinner and leaves the progress bar green.
+ */
+public function outcomeSgr(bool $ok) : string
+{
+    if ($ok) {
+        return SGR_SUCCESS;
+    }
+
+    return SGR_ERROR;
+}
+
+public function helpTheme(bool $unicode) : HelpTheme
+{
+    if ($unicode) {
+        return HelpTheme('▌', '─', true);
+    }
+
+    return HelpTheme('', '-', false);
+}
+
+public function treeTheme(bool $unicode) : TreeTheme
+{
+    if ($unicode) {
+        return TreeTheme('├─ ', '└─ ', '│ ', '  ');
+    }
+
+    return TreeTheme('|- ', '`- ', '| ', '  ');
+}
+
+public function borderTheme(bool $unicode) : BorderTheme
+{
+    if ($unicode) {
+        return BorderTheme('─', '│', '┼', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴');
+    }
+
+    return BorderTheme('-', '|', '+', '+', '+', '+', '+', '+', '+', '+', '+');
+}
+
+public function progressTheme(bool $unicode) : ProgressTheme
+{
+    if ($unicode) {
+        return ProgressTheme('━');
+    }
+
+    return ProgressTheme('-');
+}
+
+/**
+ * Prompt glyphs, in three groups.
+ *
+ * The item glyphs (pointer, radio, check) are what an element draws. The
+ * channel glyphs (bar, steps, box corners) are what a Stepper draws down the
+ * left of a session, and no element ever touches them. The last two spell the
+ * key hints a prompt puts under itself.
+ *
+ * The channel is one column wide either way, so a row lines up whether or not
+ * a session is open.
+ */
+public struct PromptTheme
+{
+    public string $pointer;
+    public string $radioOn;
+    public string $radioOff;
+    public string $checkOn;
+    public string $checkOff;
+    public string $bar;
+    public string $barStart;
+    public string $barEnd;
+    public string $stepActive;
+    public string $stepDone;
+    public string $stepError;
+    public string $markInfo;
+    public string $barH;
+    public string $cornerTr;
+    public string $connectLeft;
+    public string $cornerBr;
+    public string $ellipsis;
+    public string $nav;
+    public string $dot;
+
+    constructor(
+        string $pointer,
+        string $radioOn,
+        string $radioOff,
+        string $checkOn,
+        string $checkOff,
+        string $bar,
+        string $barStart,
+        string $barEnd,
+        string $stepActive,
+        string $stepDone,
+        string $stepError,
+        string $markInfo,
+        string $barH,
+        string $cornerTr,
+        string $connectLeft,
+        string $cornerBr,
+        string $ellipsis,
+        string $nav,
+        string $dot
+    )
+    {
+        $this->pointer = $pointer;
+        $this->radioOn = $radioOn;
+        $this->radioOff = $radioOff;
+        $this->checkOn = $checkOn;
+        $this->checkOff = $checkOff;
+        $this->bar = $bar;
+        $this->barStart = $barStart;
+        $this->barEnd = $barEnd;
+        $this->stepActive = $stepActive;
+        $this->stepDone = $stepDone;
+        $this->stepError = $stepError;
+        $this->markInfo = $markInfo;
+        $this->barH = $barH;
+        $this->cornerTr = $cornerTr;
+        $this->connectLeft = $connectLeft;
+        $this->cornerBr = $cornerBr;
+        $this->ellipsis = $ellipsis;
+        $this->nav = $nav;
+        $this->dot = $dot;
+    }
+}
+
+public function spinnerTheme(bool $unicode) : SpinnerTheme
+{
+    array<string> $frames = array<string>();
+
+    if ($unicode) {
+        $frames[] = '⠋';
+        $frames[] = '⠙';
+        $frames[] = '⠹';
+        $frames[] = '⠸';
+        $frames[] = '⠼';
+        $frames[] = '⠴';
+        $frames[] = '⠦';
+        $frames[] = '⠧';
+        $frames[] = '⠇';
+        $frames[] = '⠏';
+
+        return SpinnerTheme('✔', '■', $frames);
+    }
+
+    $frames[] = '|';
+    $frames[] = '/';
+    $frames[] = '-';
+    $frames[] = '\\';
+
+    return SpinnerTheme('*', 'x', $frames);
+}
+
+public function promptTheme(bool $unicode) : PromptTheme
+{
+    if ($unicode) {
+        return PromptTheme(
+            '❯ ', '● ', '○ ', '◼ ', '◻ ',
+            '│', '┌', '└',
+            '◆', '◇', '▲', '●',
+            '─', '╮', '├', '╯',
+            '…', '↑/↓', '•'
+        );
+    }
+
+    return PromptTheme(
+        '> ', '(*) ', '( ) ', '[x] ', '[ ] ',
+        '|', '+', '+',
+        '>', 'o', '!', '-',
+        '-', '+', '+', '+',
+        '...', 'up/down', '-'
+    );
+}

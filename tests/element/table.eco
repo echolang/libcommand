@@ -1,0 +1,61 @@
+/**
+ * Table rendering.
+ */
+
+use command::element;
+
+test table_ascii_has_header_and_row
+{
+    element::Table $t = command::CLIContext::plain()->create<element::Table>();
+    $t->column('Feature');
+    $t->column('Status');
+    array<string> $r = array<string>();
+    $r[] = 'Markup';
+    $r[] = 'ready';
+    $t->row($r);
+
+    string $page = command::stripSgr($t->render());
+
+    assert($page->contains('Feature'), 'header');
+    assert($page->contains('Status'), 'header 2');
+    assert($page->contains('Markup'), 'cell');
+    assert($page->contains('ready'), 'cell 2');
+    assert($page->contains('+'), 'ascii corner');
+    assert($page->contains('|'), 'ascii bar');
+}
+
+test table_unicode_uses_box
+{
+    command::CLIContext $ctx = .buffer(
+        command::TerminalCapabilities(false, true, 80, true)
+    );
+    element::Table $t = $ctx->create<element::Table>();
+    $t->column('A');
+    array<string> $r = array<string>();
+    $r[] = 'x';
+    $t->row($r);
+
+    string $page = $t->render();
+
+    assert($page->contains('┌'), 'tl');
+    assert($page->contains('│'), 'v');
+}
+
+test table_display_captures
+{
+    command::CLIContext $ctx = .plain();
+    element::Table $t = $ctx->create<element::Table>();
+    $t->column('Feature');
+    $t->column('Status');
+    $t->row(['Markup', 'ready']);
+    $t->display();
+
+    string $page = $t->render();
+    assert($t->captured == $page, 'captured matches render');
+    assert($ctx->captured->empty(), 'buffer capture is on the widget');
+
+    $t->display();
+    string $twice = $page;
+    $twice->append($page);
+    assert($t->captured == $twice, 'second display appends');
+}

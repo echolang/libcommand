@@ -1,0 +1,512 @@
+/**
+ * Page layout: wrapping, columns, headings, SGR stripping, tree branches.
+ * The help page and the widgets say what to draw; this file draws it.
+ *
+ * Widths are columns, not bytes. A rule drawn with box-drawing glyphs is
+ * three bytes per column, so a byte check would fail a page that fits.
+ */
+
+namespace command;
+
+public function stripSgr(const string& $text) : string
+{
+    string $out = '';
+    $out->reserve($text->size());
+    usize $i = 0;
+
+    while ($i < $text->size()) {
+        if ($text->byte($i) == CH_ESC) {
+            $i = skipSgr($text, $i);
+            continue;
+        }
+
+        $out->push($text->byte($i));
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * Index just past the SGR sequence starting at `$i` (which must be an ESC).
+ * A lone ESC, or one not followed by `[`, consumes only itself - the byte
+ * after it is text again.
+ */
+function skipSgr(const string& $text, usize $i) : usize
+{
+    usize $at = $i + 1;
+
+    if ($at >= $text->size() || $text->byte($at) != CH_LBRK) {
+        return $at;
+    }
+
+    $at = $at + 1;
+
+    while ($at < $text->size()) {
+        uint8 $b = $text->byte($at);
+        $at = $at + 1;
+
+        if ($b == CH_m) {
+            break;
+        }
+    }
+
+    return $at;
+}
+
+/**
+ * At most `$columns` columns from the front of `$text`, with `$ellipsis` where
+ * anything was dropped.
+ *
+ * SGR sequences are copied through and cost no columns, so a styled prefix
+ * survives the cut - which matters because every prompt row opens with one,
+ * and a truncator that kept the tail instead would eat the gutter.
+ */
+public function fitHead(const string& $text, int32 $columns, const string& $ellipsis) : string
+{
+    if ($columns <= 0) {
+        return '';
+    }
+
+    if (textWidth($text) <= $columns) {
+        return $text;
+    }
+
+    int32 $keep = $columns - textWidth($ellipsis);
+
+    if ($keep < 1) {
+        return $ellipsis;
+    }
+
+    string $out = '';
+    $out->reserve($text->size());
+    bool $sgr = false;
+    int32 $col = 0;
+    usize $i = 0;
+
+    while ($i < $text->size()) {
+        if ($text->byte($i) == CH_ESC) {
+            usize $from = $i;
+            $sgr = true;
+            $i = skipSgr($text, $i);
+            $out->append($text->sub($from, $i - $from));
+            continue;
+        }
+
+        if (utf8Lead($text->byte($i))) {
+            if ($col >= $keep) {
+                break;
+            }
+
+            $col = $col + 1;
+        }
+
+        $out->push($text->byte($i));
+        $i = $i + 1;
+    }
+
+    $out->append($ellipsis);
+
+    // the cut lands mid-string, so a sequence that opened before it never
+    // meets its own reset. close it here or the colour runs on into whatever
+    // the caller appends next
+    if ($sgr) {
+        $out->append(SGR_RESET);
+    }
+
+    return $out;
+}
+
+public function pageWidth(const TerminalCapabilities& $caps) : int32
+{
+    if ($caps->width == 0) {
+        return 80;
+    }
+
+    if ($caps->width > 100) {
+        return 100;
+    }
+
+    return $caps->width;
+}
+
+public function liveWidth(const TerminalCapabilities& $caps) : int32
+{
+    if ($caps->width == 0) {
+        return 80;
+    }
+
+    return $caps->width;
+}
+
+/**
+ * Columns `$s` occupies, with SGR sequences costing nothing.
+ *
+ * Counts in one pass rather than measuring a stripped copy: this is the width
+ * oracle for every prompt row, table cell and help row, so it runs tens of
+ * times per repaint and has no business allocating to produce an integer.
+ */
+public function textWidth(const string& $s) : int32
+{
+    return textWidth($s, $s->size());
+}
+
+/**
+ * The same count over `[0, $end)`. A caret asks how wide the line is in front
+ * of it on every keystroke; measuring a prefix rather than a copy of one is
+ * what keeps that from allocating.
+ */
+public function textWidth(const string& $s, usize $end) : int32
+{
+    usize $limit = $end;
+
+    if ($limit > $s->size()) {
+        $limit = $s->size();
+    }
+
+    int32 $col = 0;
+    usize $i = 0;
+
+    while ($i < $limit) {
+        if ($s->byte($i) == CH_ESC) {
+            $i = skipSgr($s, $i);
+            continue;
+        }
+
+        if (utf8Lead($s->byte($i))) {
+            $col = $col + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $col;
+}
+
+public function spaces(int32 $n) : string
+{
+    return repeatCell(' ', $n);
+}
+
+/**
+ * `$cell` repeated `$n` times. Cells are counted, not columns - a box-drawing
+ * glyph is one cell and one column, which is the only case anything repeats.
+ */
+public function repeatCell(const string& $cell, int32 $n) : string
+{
+    if ($n <= 0) {
+        return '';
+    }
+
+    return str::repeat($cell, usizeOf($n));
+}
+
+public function writeHeading(
+    string& $out,
+    const string& $text,
+    const TerminalCapabilities& $caps
+) : void
+{
+    HelpTheme $theme = helpTheme($caps->unicode);
+    string $line = '';
+    int32 $visible = 0;
+
+    if ($theme->decorate) {
+        $line->append(styled($theme->bar, SGR_SECONDARY, $caps->color));
+        $line->append(' ');
+        $visible = textWidth($theme->bar) + 1;
+    }
+
+    $line->append(styled($text, SGR_BOLD, $caps->color));
+    $visible = $visible + textWidth($text);
+
+    int32 $width = pageWidth($caps);
+
+    if ($theme->decorate && $visible + 3 < $width) {
+        string $rule = ' ';
+        $rule->append(repeatCell($theme->rule, $width - $visible - 2));
+        $line->append(styled($rule, SGR_DIM, $caps->color));
+    }
+
+    $out->append($line);
+    $out->append(std::io::NEWLINE);
+}
+
+public function writeRow(
+    string& $out,
+    const string& $spelling,
+    int32 $spellingWidth,
+    const string& $summary,
+    const string& $marker,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    int32 $width = pageWidth($caps);
+    int32 $visible = $spellingWidth;
+    string $line = $spelling;
+
+    if ($visible + 1 > $column) {
+        $out->append($line);
+        $out->append(std::io::NEWLINE);
+        $line = '';
+        $visible = 0;
+    }
+
+    $line->append(spaces($column - $visible));
+    $visible = $column;
+
+    string $marked = '';
+
+    if (!$marker->empty()) {
+        $marked = "({$marker})";
+    }
+
+    int32 $room = 8;
+
+    if ($width > $column + 8) {
+        $room = $width - $column;
+    }
+
+    int32 $reserved = 0;
+
+    if (!$marked->empty()) {
+        $reserved = textWidth($marked) + 2;
+    }
+
+    bool $align = !$marked->empty()
+        && $room > $reserved
+        && textWidth($summary) <= $room - $reserved;
+
+    string $rest = $summary;
+
+    if (!$align && !$marked->empty()) {
+        $rest = "{$summary} {$marked}";
+    }
+
+    bool $first = true;
+
+    while (true) {
+        usize $take = columnBreak($rest, $room);
+        string $slice = $rest->sub(0, $take);
+
+        $line->append($slice);
+        $visible = $visible + textWidth($slice);
+
+        if ($first && $align) {
+            $line->append(spaces($width - $visible - textWidth($marked)));
+            $line->append(styled($marked, SGR_DIM, $caps->color));
+        }
+
+        $out->append($line);
+        $out->append(std::io::NEWLINE);
+
+        if ($take >= $rest->size()) {
+            break;
+        }
+
+        $rest = $rest->sub($take, $rest->size() - $take);
+        $rest = ltrim($rest);
+
+        if ($rest->empty()) {
+            break;
+        }
+
+        $line = spaces($column);
+        $visible = $column;
+        $first = false;
+    }
+}
+
+public function writeWrapped(
+    string& $out,
+    const string& $text,
+    int32 $indent,
+    const TerminalCapabilities& $caps
+) : void
+{
+    string $margin = spaces($indent);
+    int32 $width = pageWidth($caps);
+    usize $lineStart = 0;
+    bool $first = true;
+    bool $previousIndented = false;
+
+    while ($lineStart <= $text->size()) {
+        usize $lineEnd = findFrom($text, CH_LF, $lineStart);
+
+        if ($lineEnd > $text->size()) {
+            $lineEnd = $text->size();
+        }
+
+        string $line = $text->sub($lineStart, $lineEnd - $lineStart);
+        bool $indented = !$line->empty() && $line->byte(0) == CH_SPACE;
+
+        if (!$first && !($indented && $previousIndented)) {
+            $out->append(std::io::NEWLINE);
+        }
+
+        $first = false;
+        $previousIndented = $indented;
+
+        usize $hangAt = firstNonSpace($line);
+        int32 $hang = 0;
+
+        if ($hangAt < $line->size()) {
+            $hang = textWidth($line, $hangAt);
+        }
+
+        usize $at = 0;
+
+        while ($at < $line->size()) {
+            int32 $marginWidth = $indent;
+
+            if ($at > 0) {
+                $marginWidth = $indent + $hang;
+            }
+
+            int32 $usable = 8;
+
+            if ($width > $marginWidth + 8) {
+                $usable = $width - $marginWidth;
+            }
+
+            usize $take = columnBreak($line->sub($at, $line->size() - $at), $usable);
+
+            $out->append($margin);
+
+            if ($at > 0) {
+                $out->append(spaces($hang));
+            }
+
+            $out->append($line->sub($at, $take));
+            $out->append(std::io::NEWLINE);
+            $at = $at + $take;
+
+            while ($at < $line->size() && $line->byte($at) == CH_SPACE) {
+                $at = $at + 1;
+            }
+        }
+
+        if ($lineEnd == $text->size()) {
+            break;
+        }
+
+        $lineStart = $lineEnd + 1;
+    }
+}
+
+/**
+ * The connector a value tree or a Tree widget hangs a child with.
+ * `$last` picks `└─` / `` `- ``; the rest pick `├─` / `|- `.
+ */
+public function treeBranch(bool $last, bool $unicode) : string
+{
+    TreeTheme $theme = treeTheme($unicode);
+
+    if ($last) {
+        return $theme->last;
+    }
+
+    return $theme->branch;
+}
+
+function writeTreeBranch(
+    string& $out,
+    const string& $prefix,
+    bool $last,
+    const string& $label,
+    const string& $summary,
+    const string& $marker,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    string $branch = treeBranch($last, $caps->unicode);
+    string $left = styled($branch, SGR_DIM, $caps->color);
+    string $drawn = "{$prefix}{$left}{$label}";
+    int32 $width = textWidth($prefix) + textWidth($branch) + textWidth($label);
+    writeRow($out, $drawn, $width, $summary, $marker, $column, $caps);
+}
+
+function columnBreak(const string& $s, int32 $columns) : usize
+{
+    usize $limit = bytesForColumns($s, $columns);
+
+    if ($limit >= $s->size()) {
+        return $s->size();
+    }
+
+    usize $space = lastSpaceBefore($s, $limit);
+
+    if ($space > 0 && $space < $s->size()) {
+        return $space;
+    }
+
+    return $limit;
+}
+
+function lastSpaceBefore(const string& $s, usize $end) : usize
+{
+    usize $limit = $end;
+
+    if ($limit > $s->size()) {
+        $limit = $s->size();
+    }
+
+    usize $i = $limit;
+
+    while ($i > 0) {
+        $i = $i - 1;
+
+        if ($s->byte($i) == CH_SPACE) {
+            return $i;
+        }
+    }
+
+    return $s->size();
+}
+
+function firstNonSpace(const string& $s) : usize
+{
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        if ($s->byte($i) != CH_SPACE) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $s->size();
+}
+
+function ltrim(const string& $s) : string
+{
+    usize $i = firstNonSpace($s);
+
+    if ($i == 0) {
+        return $s;
+    }
+
+    if ($i >= $s->size()) {
+        return '';
+    }
+
+    return $s->sub($i, $s->size() - $i);
+}
+
+function findFrom(const string& $s, uint8 $byte, usize $start) : usize
+{
+    usize $i = $start;
+
+    while ($i < $s->size()) {
+        if ($s->byte($i) == $byte) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $s->size();
+}

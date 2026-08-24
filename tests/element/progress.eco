@@ -1,0 +1,114 @@
+/**
+ * Cooperative bar. Spectre-shaped: glyph, two-tone track, padded percent.
+ */
+
+use command::element;
+use std::thread;
+
+test progress_noninteractive_ticks_are_silent
+{
+    element::Progress $p = command::CLIContext::plain()->create<element::Progress>();
+    $p->start('download', 10);
+    $p->advance(1, 'a.eco');
+    $p->finish();
+
+    string $got = $p->line->ctx->captured;
+    assert(!$got->contains("\r"), 'no CR');
+    assert($got->contains('*'), 'done glyph');
+    assert($got->contains('download'), 'label');
+    assert($got->contains('----------------------------------------'), 'full fill');
+    assert($got->contains('100%'), 'full percent');
+    assert($got->contains("\n"), 'a line');
+}
+
+test progress_fail_keeps_the_fraction
+{
+    element::Progress $p = command::CLIContext::plain()->create<element::Progress>();
+    $p->start('download', 10);
+    $p->set(5, 'a.eco');
+    $p->fail();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains('x'), 'failed glyph');
+    assert($got->contains('--------------------'), 'half fill');
+    assert(!$got->contains('---------------------'), 'not more than half');
+    assert($got->contains('50%'), 'percent');
+    assert($got->contains('a.eco'), 'detail');
+    assert(!$got->contains('100%'), 'not finished');
+}
+
+test progress_over_advance_clamps
+{
+    element::Progress $p = command::CLIContext::plain()->create<element::Progress>();
+    $p->start('download', 4);
+    $p->advance(100, '');
+    $p->fail();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains('----------------------------------------'), 'full bar');
+    assert($got->contains('100%'), 'clamped');
+}
+
+test progress_start_is_silent_on_a_pipe
+{
+    element::Progress $p = command::CLIContext::plain()->create<element::Progress>();
+    $p->start('download', 10);
+    $p->set(3, 'x');
+
+    assert($p->line->ctx->captured == '', 'no rewrite in a log');
+}
+
+test progress_interactive_paints_then_commits
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::Progress $p = command::CLIContext::buffer($caps)->create<element::Progress>();
+    $p->start('download', 10);
+    thread::sleep(200);
+    $p->set(4, 'a.eco');
+    $p->finish();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains("\r\x1b[K"), 'rewrote');
+    assert($got->contains('*'), 'done glyph');
+    assert($got->contains('100%'), 'final');
+    assert($got->ends("\n"), 'newline');
+}
+
+test progress_colour_splits_fill_and_rest
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(true, false, 80, true);
+    element::Progress $p = command::CLIContext::buffer($caps)->create<element::Progress>();
+    $p->start('download', 10);
+    $p->set(5, 'a.eco');
+    $p->fail();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains("\x1b[33m--------------------\x1b[39m"), 'yellow fill');
+    assert($got->contains("\x1b[31m--------------------\x1b[39m"), 'red fill');
+    assert($got->contains("\x1b[90m--------------------\x1b[39m"), 'grey rest');
+}
+
+test progress_large_total_does_not_wrap
+{
+    element::Progress $p = command::CLIContext::plain()->create<element::Progress>();
+    $p->start('download', 100000000);
+    $p->set(50000000, '');
+    $p->fail();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains('50%'), 'half of a byte-count total');
+    assert(!$got->contains('-%'), 'not a wrapped percent');
+}
+
+test progress_unicode_finish_uses_the_check
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 80, false);
+    element::Progress $p = command::CLIContext::buffer($caps)->create<element::Progress>();
+    $p->start('download', 10);
+    $p->finish();
+
+    string $got = $p->line->ctx->captured;
+    assert($got->contains('✔'), 'check');
+    assert($got->contains('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'), 'full track');
+    assert($got->contains('100%'), 'full percent');
+}

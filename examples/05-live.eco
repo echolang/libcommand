@@ -1,0 +1,34 @@
+// the live line: Spinner, the spin shorthand, Progress, and suspend() for a diagnostic.
+//
+//   echoc run -m . examples/05-live.eco
+
+use command;
+use command::element;
+use std::thread;
+
+command::CLIContext $ctx = .resolve(.auto, .stderr);
+
+$s = $ctx->create<element::Spinner>();
+$s->start('fetching');
+thread::sleep(250);
+$s->update('unpacking');
+thread::sleep(250);
+$s->suspend();
+$ctx->println('mirror is slow, using the fallback');
+$s->succeed('vendored 4 packages');
+
+int32 $n = element::spin($ctx, 'counting', function() : int32 {
+    thread::sleep(200);
+    return 4;
+});
+
+$p = $ctx->create<element::Progress>();
+$p->start('download', $n);
+int32 $i = 0;
+
+while ($i < $n) {
+    thread::sleep(150);
+    $p->advance(1, "file-{$i}.eco");
+    $i = $i + 1;
+}
+$p->finish();

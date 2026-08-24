@@ -1,0 +1,20 @@
+/**
+ * How a static widget leaves the process: a stream write, or a capture
+ * for tests. Not public; Table and Tree are the surface.
+ */
+
+namespace command::element;
+
+function writeOrCapture(
+    command::CLIContext $ctx,
+    string& $captured,
+    const string& $page
+) : void
+{
+    if ($ctx->toStream) {
+        $ctx->out->write($page);
+        return;
+    }
+
+    $captured->append($page);
+}

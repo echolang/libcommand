@@ -1,0 +1,203 @@
+/**
+ * A table of strings. Class because `create<T>` is a class constraint, and
+ * the context it draws with is the one it was minted with.
+ */
+
+namespace command::element;
+
+public struct Column
+{
+    public string $header;
+
+    constructor(string $header)
+    {
+        $this->header = $header;
+    }
+}
+
+public class Table
+{
+    public command::CLIContext $ctx;
+    public array<Column> $columns;
+    public array<array<string>> $rows;
+    public bool $showHeader;
+    public bool $border;
+    public string $captured;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->ctx = $ctx;
+        $this->columns = array<Column>();
+        $this->rows = array<array<string>>();
+        $this->showHeader = true;
+        $this->border = true;
+        $this->captured = '';
+    }
+
+    public function columns(array<string> $headers) : void
+    {
+        usize $i = 0;
+
+        while ($i < $headers->count()) {
+            $this->column($headers[$i]);
+            $i = $i + 1;
+        }
+    }
+
+    public function column(string $header) : void
+    {
+        $this->columns[] = Column($header);
+    }
+
+    public function row(array<string> $cells) : void
+    {
+        if ($cells->count() > $this->columns->count()) {
+            die('command::element::Table: row longer than the header');
+        }
+
+        $this->rows[] = $cells;
+    }
+
+    public const function render() : string
+    {
+        return renderTable($this, $this->ctx->caps);
+    }
+
+    public function display() : void
+    {
+        string $page = $this->render();
+        writeOrCapture($this->ctx, $this->captured, $page);
+    }
+}
+
+function renderTable(const Table& $t, const command::TerminalCapabilities& $caps) : string
+{
+    usize $n = $t->columns->count();
+
+    if ($n == 0) {
+        return '';
+    }
+
+    array<int32> $widths = array<int32>();
+    usize $c = 0;
+
+    while ($c < $n) {
+        int32 $w = command::textWidth($t->columns[$c]->header);
+        $widths[] = $w;
+        $c = $c + 1;
+    }
+
+    usize $r = 0;
+
+    while ($r < $t->rows->count()) {
+        $c = 0;
+
+        while ($c < $t->rows[$r]->count()) {
+            int32 $w = command::textWidth($t->rows[$r][$c]);
+
+            if ($w > $widths[$c]) {
+                $widths[$c] = $w;
+            }
+
+            $c = $c + 1;
+        }
+
+        $r = $r + 1;
+    }
+
+    command::BorderTheme $b = command::borderTheme($caps->unicode);
+    string $out = '';
+
+    if ($t->border) {
+        writeRule($out, $b, $widths, $b->tl, $b->mt, $b->tr);
+    }
+
+    if ($t->showHeader) {
+        writeCells($out, $t, $widths, $b, $caps, true, 0);
+        if ($t->border) {
+            writeRule($out, $b, $widths, $b->ml, $b->x, $b->mr);
+        }
+    }
+
+    $r = 0;
+
+    while ($r < $t->rows->count()) {
+        writeCells($out, $t, $widths, $b, $caps, false, $r);
+        $r = $r + 1;
+    }
+
+    if ($t->border) {
+        writeRule($out, $b, $widths, $b->bl, $b->mb, $b->br);
+    }
+
+    return $out;
+}
+
+function writeRule(
+    string& $out,
+    const command::BorderTheme& $b,
+    const array<int32>& $widths,
+    const string& $left,
+    const string& $mid,
+    const string& $right
+) : void
+{
+    $out->append($left);
+    usize $c = 0;
+
+    while ($c < $widths->count()) {
+        $out->append(command::repeatCell($b->h, $widths[$c] + 2));
+
+        if ($c + 1 < $widths->count()) {
+            $out->append($mid);
+        }
+
+        $c = $c + 1;
+    }
+
+    $out->append($right);
+    $out->append(std::io::NEWLINE);
+}
+
+function writeCells(
+    string& $out,
+    const Table& $t,
+    const array<int32>& $widths,
+    const command::BorderTheme& $b,
+    const command::TerminalCapabilities& $caps,
+    bool $header,
+    usize $row
+) : void
+{
+    if ($t->border) {
+        $out->append($b->v);
+    }
+
+    usize $c = 0;
+
+    while ($c < $t->columns->count()) {
+        string $cell = '';
+
+        if ($header) {
+            $cell = $t->columns[$c]->header;
+            $cell = command::styled($cell, command::SGR_BOLD, $caps->color);
+        }
+        else if ($c < $t->rows[$row]->count()) {
+            $cell = $t->rows[$row][$c];
+        }
+
+        int32 $pad = $widths[$c] - command::textWidth($cell);
+        $out->append(' ');
+        $out->append($cell);
+        $out->append(command::spaces($pad));
+        $out->append(' ');
+
+        if ($t->border) {
+            $out->append($b->v);
+        }
+
+        $c = $c + 1;
+    }
+
+    $out->append(std::io::NEWLINE);
+}

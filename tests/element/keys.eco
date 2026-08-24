@@ -1,0 +1,70 @@
+/**
+ * Key decode from complete CSI / SS3 sequences. No TTY.
+ */
+
+use command::element;
+
+test key_enter_and_space
+{
+    assert(element::decodeKey("\n") == element::Key::enter, 'lf');
+    assert(element::decodeKey("\r") == element::Key::enter, 'cr');
+    assert(element::decodeKey(' ') == element::Key::space, 'space');
+}
+
+test key_arrows_csi
+{
+    assert(element::decodeKey("\x1b[A") == element::Key::up, 'up');
+    assert(element::decodeKey("\x1b[B") == element::Key::down, 'down');
+    assert(element::decodeKey("\x1b[C") == element::Key::right, 'right');
+    assert(element::decodeKey("\x1b[D") == element::Key::left, 'left');
+}
+
+test key_home_end_page
+{
+    assert(element::decodeKey("\x1b[H") == element::Key::home, 'csi H');
+    assert(element::decodeKey("\x1b[F") == element::Key::end, 'csi F');
+    assert(element::decodeKey("\x1b[1~") == element::Key::home, '1~');
+    assert(element::decodeKey("\x1b[4~") == element::Key::end, '4~');
+    assert(element::decodeKey("\x1b[5~") == element::Key::pageUp, '5~');
+    assert(element::decodeKey("\x1b[6~") == element::Key::pageDown, '6~');
+}
+
+test key_ss3_and_escape
+{
+    assert(element::decodeKey("\x1bOA") == element::Key::up, 'ss3 up');
+    assert(element::decodeKey("\x1bOF") == element::Key::end, 'ss3 end');
+    assert(element::decodeKey("\x1b") == element::Key::escape, 'lone esc');
+    assert(element::decodeKey('x') == element::Key::text, 'letter');
+    assert(element::decodeKey('') == element::Key::other, 'empty');
+}
+
+test key_editing_bytes
+{
+    assert(element::decodeKey("\x7f") == element::Key::backspace, 'erase');
+    assert(element::decodeKey("\x08") == element::Key::backspace, 'the other erase');
+    assert(element::decodeKey("\x1b[3~") == element::Key::deleteForward, 'delete');
+    assert(element::decodeKey("\x15") == element::Key::killLine, 'ctrl-u');
+    assert(element::decodeKey("\x17") == element::Key::killWord, 'ctrl-w');
+    assert(element::decodeKey("\x01") == element::Key::home, 'ctrl-a');
+    assert(element::decodeKey("\x05") == element::Key::end, 'ctrl-e');
+    assert(element::decodeKey("\t") == element::Key::tab, 'tab');
+}
+
+test key_event_carries_its_bytes
+{
+    element::KeyEvent $a = element::decodeEvent('x');
+    assert($a->key == element::Key::text, 'a letter');
+    assert($a->text == 'x', 'and the letter itself');
+
+    element::KeyEvent $u = element::decodeEvent("\xc3\xa4");
+    assert($u->key == element::Key::text, 'a scalar');
+    assert($u->text == "\xc3\xa4", 'both of its bytes');
+
+    element::KeyEvent $s = element::decodeEvent(' ');
+    assert($s->key == element::Key::space, 'space keeps its own case');
+    assert($s->text == ' ', 'and still carries a byte to insert');
+
+    element::KeyEvent $up = element::decodeEvent("\x1b[A");
+    assert($up->key == element::Key::up, 'an arrow');
+    assert($up->text == '', 'carries nothing');
+}

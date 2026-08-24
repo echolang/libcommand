@@ -1,0 +1,23 @@
+/*
+ * libcommand - a CLI utility library for Echo.
+ *
+ * Parse argv, generate help from the same table, draw a few widgets.
+ * The C shim is termios / console raw mode. isatty and columns live on
+ * std::io::stream.
+ */
+
+#[module: "libcommand"]
+#[version: "0.1.0"]
+#[epm::license: "MIT"]
+#[epm::description: "a cli utility library for echolang"]
+
+#[if: os == windows]
+#[cc: sources "c/win32.c"]
+#[else]
+#[cc: sources "c/posix.c"]
+#[end]
+#[sources: "src/**/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/**/*.eco"]
+}

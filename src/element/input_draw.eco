@@ -1,0 +1,131 @@
+/**
+ * The value row of a text prompt: a caret, a placeholder, and a window that
+ * slides when the caret leaves it.
+ *
+ * There is no cursor-positioning here. LiveRegion climbs and repaints whole
+ * frames, so the caret is drawn rather than moved to: reverse video over the
+ * scalar it sits on. A block glyph would work at the end of the line and lie
+ * everywhere else, because inserting a column makes every width downstream
+ * disagree with the terminal by one.
+ */
+
+namespace command::element;
+
+/**
+ * Columns the value may use. One short of the row, because a caret parked at
+ * the end of the value needs a cell of its own to invert.
+ *
+ * Takes the columns rather than the whole context: the scroll window asks for
+ * this on every keystroke, and building a StepContext to read one integer off
+ * it copies the theme table for nothing.
+ */
+function valueRoom(int32 $room) : int32
+{
+    int32 $left = $room - 1;
+
+    if ($left < 4) {
+        return 4;
+    }
+
+    return $left;
+}
+
+/**
+ * The window only moves when the caret leaves it, which is what stops the
+ * text sliding under the user on every keystroke.
+ */
+function textScroll(int32 $scroll, int32 $caretCol, int32 $room) : int32
+{
+    if ($room < 1) {
+        return 0;
+    }
+
+    int32 $at = $scroll;
+
+    if ($caretCol < $at) {
+        $at = $caretCol;
+    }
+
+    if ($caretCol > $at + $room - 1) {
+        $at = $caretCol - $room + 1;
+    }
+
+    if ($at < 0) {
+        $at = 0;
+    }
+
+    return $at;
+}
+
+/**
+ * The `$count` columns starting `$from` columns in. Both ends are measured
+ * against `$s` itself, so a window near the start of a long line does not copy
+ * everything after it just to slice the front off the copy.
+ */
+function sliceColumns(const string& $s, int32 $from, int32 $count) : string
+{
+    usize $start = command::bytesForColumns($s, $from);
+
+    if ($start >= $s->size()) {
+        return '';
+    }
+
+    usize $end = command::bytesForColumns($s, $start, $count);
+
+    return $s->sub($start, $end - $start);
+}
+
+function drawValue(const Text& $p, const StepContext& $ctx) : string
+{
+    bool $color = $ctx->caps->color;
+    int32 $room = valueRoom($ctx->room);
+
+    if ($p->buf->empty() && !$p->placeholder->empty()) {
+        return drawPlaceholder($p->placeholder, $room, $color);
+    }
+
+    string $window = sliceColumns($p->buf->value, $p->scroll, $room);
+    int32 $rel = $p->buf->caretColumn() - $p->scroll;
+    usize $at = command::bytesForColumns($window, $rel);
+    string $under = ' ';
+    string $after = '';
+
+    if ($at < $window->size()) {
+        $under = command::headScalar($window, $at);
+        usize $past = $at + $under->size();
+        $after = $window->sub($past, $window->size() - $past);
+    }
+
+    string $row = $window->sub(0, $at);
+    $row->append(command::styled($under, command::SGR_REVERSE, $color));
+    $row->append($after);
+
+    return $row;
+}
+
+/**
+ * The caret sits on the first scalar of the hint and the rest is dimmed. Two
+ * spans one after the other, not one inside the other: reverse and dim are
+ * different attributes and neither scalar wants both.
+ */
+function drawPlaceholder(const string& $placeholder, int32 $room, bool $color) : string
+{
+    string $shown = sliceColumns($placeholder, 0, $room);
+    string $first = command::headScalar($shown);
+    string $rest = $shown->sub($first->size(), $shown->size() - $first->size());
+    string $row = command::styled($first, command::SGR_REVERSE, $color);
+    $row->append(command::styled($rest, command::SGR_DIM, $color));
+
+    return $row;
+}
+
+function plainQuestion(const Text& $p) : string
+{
+    string $line = $p->title;
+
+    if (!$p->fallback->empty()) {
+        $line->append(" [{$p->fallback}]");
+    }
+
+    return $p->channel()->askRow($line);
+}

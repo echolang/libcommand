@@ -1,0 +1,209 @@
+/**
+ * A live block of more than one row. Selection prompts rewrite a menu;
+ * Progress and Spinner keep using LiveLine (CR+EL, never cursor-up).
+ *
+ * Vocabulary is cursor-up and erase-down. The previous height is how far
+ * to climb before the next paint.
+ *
+ * The terminal's own cursor is hidden for as long as a frame is on screen.
+ * Widgets drawn here paint their caret into the frame - reverse video on the
+ * scalar it sits on - and the real cursor, parked wherever the last byte of
+ * the frame landed, would read as a second caret. It comes back on commit,
+ * on erase, and if this region is dropped still hidden. The shim brings it
+ * back on a signal.
+ */
+
+namespace command::element;
+
+public class LiveRegion
+{
+    public command::CLIContext $ctx;
+    public int32 $height;
+    public bool $hidden;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->ctx = $ctx;
+        $this->height = 0;
+        $this->hidden = false;
+    }
+
+    destructor()
+    {
+        if ($this->hidden) {
+            $this->erase();
+        }
+    }
+
+    public const function interactive() : bool
+    {
+        return $this->ctx->caps->interactive;
+    }
+
+    /**
+     * Whether a prompt drawn here can run live: something has to be able to
+     * read the frame, and something has to be able to type at it.
+     */
+    public const function drivable() : bool
+    {
+        return $this->ctx->caps->interactive && stdinIsTty();
+    }
+
+    public function paint(const string& $text) : void
+    {
+        usize $n = trimmedLen($text);
+        int32 $rows = frameRows($text, $n);
+
+        if (!$this->ctx->caps->interactive) {
+            $this->height = $rows;
+            return;
+        }
+
+        string $seq = $this->hide();
+        $seq->append($this->rewind());
+        $seq->append($text->sub(0, $n));
+        $this->ctx->write($seq);
+        $this->height = $rows;
+    }
+
+    public function commit(const string& $text) : void
+    {
+        if ($this->ctx->caps->interactive) {
+            $this->paint($text);
+            string $tail = std::io::NEWLINE;
+            $tail->append($this->show());
+            $this->ctx->write($tail);
+            $this->height = 0;
+            return;
+        }
+
+        string $out = $text->sub(0, trimmedLen($text));
+        $out->append(std::io::NEWLINE);
+        $this->ctx->write($out);
+        $this->height = 0;
+    }
+
+    public function erase() : void
+    {
+        if (!$this->ctx->caps->interactive) {
+            $this->height = 0;
+            $this->hidden = false;
+            return;
+        }
+
+        string $seq = $this->rewind();
+        $seq->append($this->show());
+
+        if ($seq->empty()) {
+            return;
+        }
+
+        $this->ctx->write($seq);
+        $this->height = 0;
+    }
+
+    /**
+     * The climb back to the top of the block on screen, and the erase of it.
+     */
+    const function rewind() : string
+    {
+        if ($this->height <= 0) {
+            return '';
+        }
+
+        string $seq = command::cursorUp($this->height - 1);
+        $seq->append(command::CSI_ERASE_DOWN);
+
+        return $seq;
+    }
+
+    /**
+     * The bytes that take the terminal's cursor away, once. The shim is told
+     * as well, so a Ctrl-C out of a live prompt does not leave a terminal
+     * without a cursor - ISIG stays set in raw mode, so that is a real exit.
+     */
+    function hide() : string
+    {
+        if ($this->hidden || !$this->ctx->caps->interactive) {
+            return '';
+        }
+
+        $this->hidden = true;
+
+        if ($this->ctx->toStream) {
+            command::command_cursor_hidden(1);
+        }
+
+        return command::CURSOR_HIDE;
+    }
+
+    function show() : string
+    {
+        if (!$this->hidden) {
+            return '';
+        }
+
+        $this->hidden = false;
+
+        if ($this->ctx->toStream) {
+            command::command_cursor_hidden(0);
+        }
+
+        return command::CURSOR_SHOW;
+    }
+}
+
+/**
+ * How much of `$s` is frame, with any trailing newlines cut off.
+ *
+ * A length rather than a trimmed copy: a repaint runs this on the whole frame
+ * on every keystroke, and in the common case - `stepFrame` never ends in a
+ * newline - the copy would be the entire frame, byte for byte, for nothing.
+ */
+function trimmedLen(const string& $s) : usize
+{
+    usize $n = $s->size();
+
+    while ($n > 0) {
+        uint8 $b = $s->byte($n - 1);
+
+        if ($b != command::CH_LF && $b != command::CH_CR) {
+            break;
+        }
+
+        $n = $n - 1;
+    }
+
+    return $n;
+}
+
+function frameRows(const string& $frame) : int32
+{
+    return frameRows($frame, $frame->size());
+}
+
+function frameRows(const string& $frame, usize $end) : int32
+{
+    usize $limit = $end;
+
+    if ($limit > $frame->size()) {
+        $limit = $frame->size();
+    }
+
+    if ($limit == 0) {
+        return 0;
+    }
+
+    int32 $rows = 1;
+    usize $i = 0;
+
+    while ($i < $limit) {
+        if ($frame->byte($i) == command::CH_LF) {
+            $rows = $rows + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $rows;
+}

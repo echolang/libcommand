@@ -1,0 +1,150 @@
+/**
+ * The channel down the left. Pure strings in, pure strings out - no region,
+ * no stream, no terminal.
+ */
+
+use command;
+use command::element;
+
+test stepper_off_session_indents_by_two
+{
+    element::Stepper $s = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->row('a') == '  a', 'two spaces, no bar');
+    assert($s->leadWidth() == 2, 'two columns of channel');
+}
+
+test stepper_in_session_draws_the_bar
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->row('a') == '│  a', 'bar, two spaces, row');
+    assert($s->leadWidth() == 3, 'three columns of channel');
+}
+
+test stepper_drops_a_lead_off_session
+{
+    element::Stepper $s = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->leadRow('◆', command::SGR_SECONDARY, 'pick one') == '  pick one', 'no lone symbol');
+}
+
+test stepper_keeps_a_glyph_off_session
+{
+    element::Stepper $s = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->glyphRow('⠙', command::SGR_INFO, 'building') == '  ⠙ building', 'glyph moves inside');
+}
+
+test stepper_promotes_a_glyph_in_session
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->glyphRow('⠙', command::SGR_INFO, 'building') == '⠙  building', 'glyph takes the bar column');
+}
+
+test stepper_spacer_is_nothing_off_session
+{
+    element::Stepper $off = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+    element::Stepper $on = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($off->spacer() == '', 'no blank rhythm on its own');
+    assert($on->spacer() == '│', 'a bar between steps');
+}
+
+test stepper_opens_and_closes
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->open('create-app') == '┌  create-app', 'intro');
+    assert($s->close('done') == "│\n└  done", 'a bar, then the end');
+}
+
+test stepper_state_symbols
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($s->stateSymbol(element::StepState::active) == '◆', 'active is filled');
+    assert($s->stateSymbol(element::StepState::done) == '◇', 'done is hollow');
+    assert($s->stateSymbol(element::StepState::failed) == '▲', 'failed is a warning');
+}
+
+test stepper_ascii_channel_is_still_one_column
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, false, 80, true));
+
+    assert($s->row('a') == '|  a', 'ascii bar');
+    assert($s->open('x') == '+  x', 'ascii corner');
+    assert(command::textWidth($s->row('a')) == 4, 'three of channel and one of row');
+}
+
+test stepper_colours_only_the_channel
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(true, true, 80, true));
+    string $got = $s->row('a');
+
+    assert($got->starts(command::SGR_MUTED), 'the bar is muted');
+    assert($got->ends('  a'), 'the row is left alone');
+    assert(command::textWidth($got) == 4, 'escapes cost no columns');
+}
+
+test stepper_channel_takes_the_state_colour
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(true, true, 80, true));
+
+    assert($s->stateRow('a', element::StepState::active)->starts(command::SGR_SECONDARY), 'live');
+    assert($s->stateRow('a', element::StepState::failed)->starts(command::SGR_WARNING), 'refused');
+    assert($s->stateRow('a', element::StepState::done)->starts(command::SGR_MUTED), 'settled');
+    assert($s->row('a')->starts(command::SGR_MUTED), 'a plain row is a settled one');
+}
+
+test stepper_foot_closes_a_run_only
+{
+    element::Stepper $on = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+    element::Stepper $off = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($on->foot(element::StepState::active) == '└', 'the cap closes the channel');
+    assert($off->foot(element::StepState::active) == '', 'nothing to close on its own');
+}
+
+test stepper_only_a_live_frame_is_capped
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+    array<string> $rows = array<string>();
+    $rows[] = 'value';
+
+    string $live = element::frameRowsOf($s, 'Where?', $rows, element::StepState::active);
+    string $settled = element::summaryRowsOf($s, 'Where?', $rows);
+
+    assert($live == "◆  Where?\n│  value", 'frameRowsOf leaves the cap to stepFrame');
+    assert($settled == "◇  Where?\n│  value", 'a summary is never capped');
+    assert($settled->starts('◇'), 'and keeps its own symbol');
+}
+
+test stepper_room_reserves_the_last_column
+{
+    element::Stepper $on = element::Stepper(true, command::TerminalCapabilities(false, true, 40, true));
+    element::Stepper $off = element::Stepper(false, command::TerminalCapabilities(false, true, 40, true));
+
+    assert($on->room() == 36, 'forty less three of channel and one held back');
+    assert($off->room() == 37, 'forty less two of indent and one held back');
+}
+
+test stepper_never_fills_the_last_column
+{
+    element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 20, true));
+    string $got = $s->row('abcdefghijklmnopqrstuvwxyz');
+
+    assert(command::textWidth($got) < 20, 'a row that reaches the edge would wrap');
+    assert($got->starts('│  '), 'the channel survives the cut');
+    assert($got->ends('…'), 'the tail is what went');
+}
+
+test stepper_context_hides_the_pointer_in_a_session
+{
+    element::Stepper $on = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
+    element::Stepper $off = element::Stepper(false, command::TerminalCapabilities(false, true, 80, true));
+
+    assert($on->context()->pointer == '', 'colour marks focus in a run');
+    assert($off->context()->pointer == '❯ ', 'a pointer marks it on its own');
+}

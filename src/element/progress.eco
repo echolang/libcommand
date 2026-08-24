@@ -1,0 +1,278 @@
+/**
+ * A cooperative bar. The fill moves only when the caller says something
+ * changed. The spinner is the other thread.
+ */
+
+namespace command::element;
+
+use std::thread;
+
+#[atomic]
+public class Progress : LiveTicks
+{
+    public LiveLine $line;
+    public Ticker $ticker;
+    public string $label;
+    public string $detail;
+    public int32 $current;
+    public int32 $total;
+    public int32 $frame;
+    public command::CLIContext $ctx;
+
+    /** Resolved once: the tick runs 12.5x a second and only ever reads them. */
+    public command::SpinnerTheme $spin;
+    public command::ProgressTheme $track;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->line = LiveLine($ctx);
+        $this->ticker = Ticker();
+        $this->label = '';
+        $this->detail = '';
+        $this->current = 0;
+        $this->total = 0;
+        $this->frame = 0;
+        $this->ctx = $ctx;
+        $this->spin = command::spinnerTheme($ctx->caps->unicode);
+        $this->track = command::progressTheme($ctx->caps->unicode);
+    }
+
+    destructor()
+    {
+        $this->ticker->halt();
+        $this->line->erase();
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    public function start(string $label, int32 $total) : void
+    {
+        if ($this->ticker->running->load()) {
+            die('command::element::Progress: already running');
+        }
+
+        $this->ctx->gap();
+        $this->line->paint($this->resetRow($label, $total));
+
+        if (!$this->line->interactive()) {
+            $this->ticker->arm('command::element::Progress');
+            return;
+        }
+
+        $this->ticker->start('command::element::Progress', $this);
+    }
+
+    public function advance(int32 $n, string $detail) : void
+    {
+        $this->line->paint($this->lockedAdd($n, $detail));
+    }
+
+    public function set(int32 $n, string $detail) : void
+    {
+        $this->line->paint($this->lockedApply($n, $detail));
+    }
+
+    public function finish() : void
+    {
+        $this->ticker->halt();
+
+        if ($this->total > 0) {
+            $this->current = $this->total;
+        }
+
+        $this->commitFinal(true);
+    }
+
+    public function fail() : void
+    {
+        $this->ticker->halt();
+        $this->commitFinal(false);
+    }
+
+    public function suspend() : void
+    {
+        $this->ticker->pause();
+        $this->line->erase();
+    }
+
+    function resetRow(string $label, int32 $total) : string
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        $this->label = $label;
+        $this->detail = '';
+        $this->current = 0;
+        $this->total = $total;
+        $this->frame = 0;
+
+        return $this->runningRow();
+    }
+
+    function tickOnce() : void
+    {
+        string? $row = $this->takeRow();
+        string $text = guard $row else {
+            return;
+        }
+
+        $this->line->paint($text);
+    }
+
+    function takeRow() : string?
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if (!$this->ticker->running->load() || $this->ticker->paused->load()) {
+            return null;
+        }
+
+        string $row = $this->runningRow();
+        $this->frame = $this->frame + 1;
+
+        return $row;
+    }
+
+    function lockedAdd(int32 $n, string $detail) : string
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        return $this->applyFields($this->current + $n, $detail);
+    }
+
+    function lockedApply(int32 $n, string $detail) : string
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        return $this->applyFields($n, $detail);
+    }
+
+    function applyFields(int32 $n, string $detail) : string
+    {
+        $this->current = $n;
+        $this->detail = $detail;
+
+        if ($this->current < 0) {
+            $this->current = 0;
+        }
+
+        if ($this->total > 0 && $this->current > $this->total) {
+            $this->current = $this->total;
+        }
+
+        $this->ticker->paused->store(false);
+
+        return $this->runningRow();
+    }
+
+    const function runningRow() : string
+    {
+        string $glyph = $this->spin->frameAt($this->frame);
+
+        return $this->drawRow($glyph, command::SGR_WARNING);
+    }
+
+    function commitFinal(bool $ok) : void
+    {
+        $this->line->commit($this->drawRow($this->spin->outcome($ok), command::outcomeSgr($ok)));
+    }
+
+    /**
+     * The mark, the track and the percent, in one colour. The glyph and the
+     * fill are the same state saying the same thing, so they take the same
+     * SGR - a running bar is amber throughout, a finished one green.
+     */
+    const function drawRow(const string& $glyph, const string& $sgr) : string
+    {
+        bool $color = $this->line->ctx->caps->color;
+        int32 $barWidth = barWidth(
+            $this->channel()->glyphRoom($glyph),
+            $this->label,
+            $this->detail
+        );
+        int32 $percent = scaledShare($this->current, $this->total, 100);
+        int32 $filled = scaledShare($this->current, $this->total, $barWidth);
+
+        if ($filled > $barWidth) {
+            $filled = $barWidth;
+        }
+
+        string $pct = padPercent($percent);
+        string $emptyCell = $this->track->cell;
+
+        if (!$color) {
+            $emptyCell = ' ';
+        }
+
+        string $fill = command::repeatCell($this->track->cell, $filled);
+        string $rest = command::repeatCell($emptyCell, $barWidth - $filled);
+        string $painted = command::styled($fill, $sgr, $color);
+        $painted->append(command::styled($rest, command::SGR_MUTED, $color));
+
+        if ($percent == 100) {
+            $pct = command::styled($pct, command::SGR_SUCCESS, $color);
+        }
+
+        string $text = "{$this->label} {$painted} {$pct}";
+
+        if (!$this->detail->empty()) {
+            $text->append("  {$this->detail}");
+        }
+
+        return $this->channel()->glyphRow($glyph, $sgr, $text);
+    }
+}
+
+function scaledShare(int32 $part, int32 $whole, int32 $scale) : int32
+{
+    if ($whole <= 0) {
+        return 0;
+    }
+
+    int64 $n = $part as int64;
+    int64 $d = $whole as int64;
+    int64 $s = $scale as int64;
+
+    return (($n * $s) / $d) as int32;
+}
+
+function padPercent(int32 $percent) : string
+{
+    string $s = "{$percent}%";
+    int32 $w = command::textWidth($s);
+
+    if ($w >= 4) {
+        return $s;
+    }
+
+    string $pad = command::spaces(4 - $w);
+
+    return "{$pad}{$s}";
+}
+
+/**
+ * The bar fills whatever the row has left over. `$room` is what the Stepper
+ * granted the body; everything subtracted here is the bar's own row - the
+ * label, the space either side, and the four columns of `100%`.
+ */
+function barWidth(int32 $room, const string& $label, const string& $detail) : int32
+{
+    int32 $fixed = command::textWidth($label) + 1 + 1 + 4;
+
+    if (!$detail->empty()) {
+        $fixed = $fixed + 2 + command::textWidth($detail);
+    }
+
+    $room = $room - $fixed;
+
+    if ($room < 4) {
+        $room = 4;
+    }
+
+    if ($room < 40) {
+        return $room;
+    }
+
+    return 40;
+}

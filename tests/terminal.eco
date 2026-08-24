@@ -1,0 +1,155 @@
+/**
+ * Capabilities and SGR. Tests never ask the host tty.
+ */
+
+use command;
+
+test plain_is_all_off
+{
+    command::TerminalCapabilities $c = command::plain();
+
+    assert(!$c->color, 'no colour');
+    assert(!$c->unicode, 'no unicode');
+    assert($c->width == 0, 'no width');
+    assert(!$c->interactive, 'not interactive');
+}
+
+test styled_is_a_no_op_when_colour_is_off
+{
+    string $got = command::styled('build', command::SGR_INFO, false);
+
+    assert($got == 'build', 'untouched');
+}
+
+test styled_wraps_when_colour_is_on
+{
+    string $got = command::styled('build', command::SGR_INFO, true);
+
+    assert($got == "\x1b[34mbuild\x1b[39m", 'SGR around the word, closed by colour');
+}
+
+test styled_empty_stays_empty
+{
+    string $got = command::styled('', command::SGR_BOLD, true);
+
+    assert($got == '', 'empty is empty');
+}
+
+test color_named_accepts_the_closed_set
+{
+    command::ColorChoice $a = command::colorNamed('auto') ?? .never;
+    command::ColorChoice $b = command::colorNamed('always') ?? .never;
+    command::ColorChoice $c = command::colorNamed('never') ?? .auto;
+
+    assert($a == command::ColorChoice::auto, 'auto');
+    assert($b == command::ColorChoice::always, 'always');
+    assert($c == command::ColorChoice::never, 'never');
+}
+
+test color_named_refuses_a_typo
+{
+    command::ColorChoice? $got = command::colorNamed('alwyas');
+
+    assert($got == null, 'a mistype is nothing, not auto');
+}
+
+test resolve_from_always_colours_a_pipe
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::always,
+        false,
+        0,
+        false,
+        '',
+        '',
+        'xterm'
+    );
+
+    assert($c->color, 'always means colour');
+    assert(!$c->interactive, 'a pipe is not a cursor');
+    assert(!$c->unicode, 'not a tty, no glyphs');
+    assert($c->width == 0, 'not a tty, no width');
+}
+
+test resolve_from_never_is_plain_on_a_tty
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::never,
+        true,
+        80,
+        true,
+        '',
+        '',
+        'xterm'
+    );
+
+    assert(!$c->color, 'never');
+    assert($c->unicode, 'unicode is a repertoire question');
+    assert($c->interactive, 'still a tty');
+    assert($c->width == 80, 'width from ioctl');
+}
+
+test resolve_from_nocolor_wins_over_auto
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::auto,
+        true,
+        80,
+        true,
+        '1',
+        '',
+        'xterm'
+    );
+
+    assert(!$c->color, 'NO_COLOR');
+    assert($c->interactive, 'still a tty');
+}
+
+test resolve_from_clicolor_force_colours_a_pipe
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::auto,
+        false,
+        0,
+        false,
+        '',
+        '1',
+        'xterm'
+    );
+
+    assert($c->color, 'CLICOLOR_FORCE');
+    assert(!$c->interactive, 'still not a cursor');
+}
+
+test resolve_from_term_dumb_is_no_colour
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::auto,
+        true,
+        80,
+        true,
+        '',
+        '',
+        'dumb'
+    );
+
+    assert(!$c->color, 'TERM=dumb');
+}
+
+test resolve_from_auto_on_a_tty_colours
+{
+    command::TerminalCapabilities $c = command::resolveFrom(
+        command::ColorChoice::auto,
+        true,
+        120,
+        true,
+        '',
+        '',
+        'xterm-256color'
+    );
+
+    assert($c->color, 'auto + tty');
+    assert($c->unicode, 'locale said so');
+    assert($c->width == 120, 'ioctl width');
+    assert($c->interactive, 'tty');
+}

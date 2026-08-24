@@ -1,0 +1,141 @@
+/**
+ * Help structure. Wording is not pinned; presence, columns, and width are.
+ */
+
+use command;
+
+function parsedHelp(const command::Command& $app, const array<string>& $rest) : command::Parsed
+{
+    command::Outcome $r = $app->parse(argv($rest));
+    assert($r->error == null, 'parse ok');
+    assert($r->parsed->wantsHelp, 'asked for help');
+
+    return $r->parsed;
+}
+
+function noLineTooWide(const string& $page, int32 $width) : bool
+{
+    array<string> $lines = str::split(command::stripSgr($page), "\n")->owned();
+    usize $i = 0;
+
+    while ($i < $lines->count()) {
+        if (command::textWidth($lines[$i]) > $width) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
+}
+
+test version_is_the_number_and_a_newline
+{
+    command::Command $app = greet();
+
+    assert(command::renderVersion($app) == "0.1.0\n", 'version only');
+}
+
+test root_help_lists_commands_and_builtins
+{
+    command::Command $app = greet();
+    command::Parsed $p = parsedHelp($app, words1('--help'));
+    string $page = command::renderHelp($app, $p, command::plain());
+    string $plain = command::stripSgr($page);
+
+    assert($plain->contains('Usage'), 'usage');
+    assert($plain->contains('Commands'), 'commands');
+    assert($plain->contains('build'), 'build');
+    assert($plain->contains('--help'), 'help');
+    assert($plain->contains('--version'), 'version');
+    assert($plain->contains('--color'), 'color');
+    assert(!$plain->contains('--output'), 'build flags stay off the root page');
+    assert(noLineTooWide($page, 80), 'width');
+}
+
+test build_help_lists_accepted_options
+{
+    command::Command $app = greet();
+    command::Parsed $p = parsedHelp($app, words2('build', '--help'));
+    string $page = command::renderHelp($app, $p, command::plain());
+    string $plain = command::stripSgr($page);
+
+    assert($plain->contains('--output'), 'output');
+    assert($plain->contains('--optimize'), 'optimize');
+    assert($plain->contains('|- none'), 'ascii tree');
+    assert($plain->contains('module'), 'module value');
+    assert($plain->contains('(default)'), 'fallback marker');
+    assert($plain->contains('How it is built'), 'category');
+    assert($plain->contains('What is built'), 'inputs');
+    assert(noLineTooWide($page, 80), 'width');
+}
+
+test option_page_is_the_prose
+{
+    command::Command $app = greet();
+    command::Parsed $p = parsedHelp($app, words3('build', '--help', 'optimize'));
+    string $page = command::renderHelp($app, $p, command::plain());
+    string $plain = command::stripSgr($page);
+
+    assert($plain->contains('--optimize'), 'heading');
+    assert($plain->contains('none'), 'value');
+    assert($plain->contains('Accepted by'), 'who');
+    assert($plain->contains("Defaults to 'module'"), 'fallback');
+}
+
+test unicode_help_uses_box_trees
+{
+    command::Command $app = greet();
+    command::Parsed $p = parsedHelp($app, words2('build', '--help'));
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 80, true);
+    string $page = command::renderHelp($app, $p, $caps);
+    string $plain = command::stripSgr($page);
+
+    assert($plain->contains('▌'), 'bar');
+    assert($plain->contains('├─'), 'branch');
+    assert($plain->contains('└─'), 'last');
+}
+
+test error_page_has_usage
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(words1('greet'));
+    command::Error $e = $r->error ?? .noCommand;
+    string $page = command::renderError($e, $app, $r->parsed, command::plain());
+    string $plain = command::stripSgr($page);
+
+    assert($plain->starts('error:'), 'badge');
+    assert($plain->contains('Usage'), 'usage');
+    assert($plain->contains('--help'), 'pointer');
+}
+
+test positional_category_is_the_one_you_named
+{
+    command::Command $app = command::Command('greet', '0.1.0', 'say hello');
+    command::Subcommand $build = $app->command('build', 'compile', 'Compile it.');
+    $app->positional($build, '<sources...>', 'the files', 'The sources.', 0, -1, 'Sources');
+    command::Arg $out = $app->arg('output', 'o', '<file>', 'where it goes');
+    $app->category($out, 'What is built');
+    $app->accept($out, $build);
+
+    command::Parsed $p = parsedHelp($app, words2('build', '--help'));
+    string $plain = command::stripSgr(command::renderHelp($app, $p, command::plain()));
+
+    assert($plain->contains('Sources'), 'named category');
+    assert($plain->contains('<sources...>'), 'the metavar');
+    assert($plain->contains('What is built'), 'option category is separate');
+    assert(!$plain->contains('The sources.'), 'the long description is not a second copy');
+}
+
+test root_help_shows_a_positional
+{
+    command::Command $app = command::Command('grep', '0.1.0', 'search');
+    $app->positional('<pattern>', 'the pattern', 'A regular expression.', 1, 1, 'Input');
+
+    command::Parsed $p = parsedHelp($app, words1('--help'));
+    string $plain = command::stripSgr(command::renderHelp($app, $p, command::plain()));
+
+    assert($plain->contains('<pattern>'), 'metavar');
+    assert($plain->contains('Input'), 'category');
+    assert($plain->contains('[options] <pattern>'), 'usage');
+}

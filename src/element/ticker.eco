@@ -1,0 +1,97 @@
+/**
+ * The 80ms loop Progress and Spinner share. Paint stays on the widget;
+ * this object is running / paused / join.
+ */
+
+namespace command::element;
+
+use std::thread;
+
+interface LiveTicks
+{
+    function tickOnce() : void;
+}
+
+#[atomic]
+public class Ticker
+{
+    public thread::mutex<int32> $gate;
+    public atomic<bool> $running;
+    public atomic<bool> $paused;
+    public thread::handle? $worker;
+    public bool $hasWorker;
+
+    constructor()
+    {
+        $this->gate = thread::mutex<int32>(0);
+        $this->running = atomic<bool>(false);
+        $this->paused = atomic<bool>(false);
+        $this->worker = null;
+        $this->hasWorker = false;
+    }
+
+    public function arm(string $who) : void
+    {
+        if ($this->running->load()) {
+            die("{$who}: already running");
+        }
+
+        $this->paused->store(false);
+        $this->running->store(true);
+        $this->hasWorker = false;
+    }
+
+    public function start(string $who, LiveTicks $host) : void
+    {
+        $this->arm($who);
+
+        Ticker $self = $this;
+        result<thread::handle, thread::error> $r = thread::spawn(function() : void {
+            while ($self->running->load()) {
+                if ($self->paused->load()) {
+                    thread::sleep(80);
+                    continue;
+                }
+
+                $host->tickOnce();
+                thread::sleep(80);
+            }
+        });
+
+        if ($r->failed()) {
+            $this->running->store(false);
+            die($r->failure()->message());
+        }
+
+        $this->worker = $r->unwrap();
+        $this->hasWorker = true;
+    }
+
+    public function halt() : void
+    {
+        if (!$this->running->load()) {
+            return;
+        }
+
+        $this->running->store(false);
+
+        if (!$this->hasWorker) {
+            return;
+        }
+
+        $this->hasWorker = false;
+        thread::handle $h = $this->worker ?? missingWorker();
+        $h->join();
+        $this->worker = null;
+    }
+
+    public function pause() : void
+    {
+        $this->paused->store(true);
+    }
+}
+
+function missingWorker() : thread::handle
+{
+    die('command::element::Ticker: missing worker');
+}

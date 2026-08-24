@@ -1,0 +1,359 @@
+/**
+ * A list the user picks from. Radio is one item; checks are many.
+ * ask() always returns array<string>.
+ *
+ * Interactive: arrow keys, space to toggle checks, enter to confirm.
+ * Otherwise a numbered list and a line of stdin.
+ */
+
+namespace command::element;
+
+public enum SelectKind
+{
+    case radio;
+    case checks;
+}
+
+public class Select : Step
+{
+    public command::CLIContext $ctx;
+    public string $title;
+    public SelectKind $kind;
+    public array<string> $items;
+    public array<bool> $marked;
+    public int32 $cursor;
+    public int32 $pageOff;
+    public int32 $pageN;
+    public bool $wrapAround;
+    public bool $must;
+    public bool $didPick;
+    public LiveRegion $region;
+
+    constructor(command::CLIContext $ctx, string $title)
+    {
+        $this->seat($ctx, $title, .radio);
+    }
+
+    constructor(command::CLIContext $ctx, string $title, SelectKind $kind)
+    {
+        $this->seat($ctx, $title, $kind);
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    public const function head() : string
+    {
+        return $this->title;
+    }
+
+    public const function body(const StepContext& $ctx) : array<string>
+    {
+        return selectRows($this, $ctx);
+    }
+
+    public const function summary(const StepContext& $ctx) : array<string>
+    {
+        return summaryRows(collectPicks($this));
+    }
+
+    public function choice(string $label) : void
+    {
+        $this->items[] = $label;
+        $this->marked[] = false;
+    }
+
+    public function choices(array<string> $labels) : void
+    {
+        usize $i = 0;
+
+        while ($i < $labels->count()) {
+            $this->choice($labels[$i]);
+            $i = $i + 1;
+        }
+    }
+
+    public function pageSize(int32 $n) : void
+    {
+        if ($n < 1) {
+            $n = 1;
+        }
+
+        $this->pageN = $n;
+        $this->ensureWindow();
+    }
+
+    public function wrap(bool $on) : void
+    {
+        $this->wrapAround = $on;
+    }
+
+    public function require(bool $on) : void
+    {
+        $this->must = $on;
+    }
+
+    public function pick(string $label) : void
+    {
+        int32 $at = indexOf($this, $label);
+
+        if ($at < 0) {
+            die("command::element::Select: unknown pick '{$label}'");
+        }
+
+        usize $i = command::usizeOf($at);
+
+        if ($this->kind == SelectKind::radio) {
+            $this->cursor = $at;
+            $this->didPick = true;
+            $this->ensureWindow();
+            return;
+        }
+
+        bool $any = anyMarked($this);
+        $this->marked[$i] = true;
+        $this->didPick = true;
+
+        if (!$any) {
+            $this->cursor = $at;
+        }
+
+        $this->ensureWindow();
+    }
+
+    public function ask() : array<string>
+    {
+        needItems($this);
+        $this->ctx->gap();
+
+        // the one gate on the way in. every mutator leaves the window
+        // consistent, but `cursor` and `pageN` are public fields, and this is
+        // the last point before something is drawn from them
+        $this->ensureWindow();
+
+        if ($this->region->drivable()) {
+            return askLive($this);
+        }
+
+        return askLine($this);
+    }
+
+    public function feed(const KeyEvent& $event) : bool
+    {
+        return $this->feed($event->key);
+    }
+
+    public function feed(Key $key) : bool
+    {
+        needItems($this);
+
+        if ($key == Key::enter) {
+            if (!canConfirm($this)) {
+                $this->region->paint($this->frame());
+                return false;
+            }
+
+            $this->finish();
+            return true;
+        }
+
+        applyKey($this, $key);
+        $this->region->paint($this->frame());
+        return false;
+    }
+
+    public function tryAnswer(const string& $line) : array<string>?
+    {
+        needItems($this);
+        array<string>? $got = parseLine($this, $line);
+
+        if ($got == null) {
+            return null;
+        }
+
+        array<string> $picked = $got ?? array<string>();
+        syncMarks($this, $picked);
+
+        return $picked;
+    }
+
+    public function answer(const string& $line) : array<string>
+    {
+        array<string>? $got = $this->tryAnswer($line);
+
+        if ($got == null) {
+            badLine($line);
+        }
+
+        return $got ?? array<string>();
+    }
+
+    public function result() : array<string>
+    {
+        return collectPicks($this);
+    }
+
+    public function frame() : string
+    {
+        $this->ensureWindow();
+
+        return stepFrame($this->channel(), $this, StepState::active);
+    }
+
+    public function numbered() : string
+    {
+        return drawNumbered($this);
+    }
+
+    function seat(
+        command::CLIContext $ctx,
+        string $title,
+        SelectKind $kind
+    ) : void
+    {
+        $this->ctx = $ctx;
+        $this->title = $title;
+        $this->kind = $kind;
+        $this->items = array<string>();
+        $this->marked = array<bool>();
+        $this->cursor = 0;
+        $this->pageOff = 0;
+        $this->pageN = 10;
+        $this->wrapAround = false;
+        $this->must = true;
+        $this->didPick = false;
+        $this->region = LiveRegion($ctx);
+    }
+
+    /**
+     * How many rows the list may show. `pageN` is a public field, so the
+     * clamp lives here rather than in each of the three places that page,
+     * window and draw from it - three expressions of one floor agree only
+     * until one of them is edited.
+     */
+    public const function visible() : int32
+    {
+        if ($this->pageN < 1) {
+            return 1;
+        }
+
+        return $this->pageN;
+    }
+
+    public function ensureWindow() : void
+    {
+        int32 $n = command::i32Of($this->items->count());
+        int32 $vis = $this->visible();
+
+        if ($n <= 0) {
+            $this->cursor = 0;
+            $this->pageOff = 0;
+            return;
+        }
+
+        if ($this->cursor < 0) {
+            $this->cursor = 0;
+        }
+
+        if ($this->cursor >= $n) {
+            $this->cursor = $n - 1;
+        }
+
+        if ($n <= $vis) {
+            $this->pageOff = 0;
+            return;
+        }
+
+        if ($this->cursor < $this->pageOff) {
+            $this->pageOff = $this->cursor;
+        }
+
+        if ($this->cursor >= $this->pageOff + $vis) {
+            $this->pageOff = $this->cursor - $vis + 1;
+        }
+
+        if ($this->pageOff < 0) {
+            $this->pageOff = 0;
+        }
+
+        if ($this->pageOff + $vis > $n) {
+            $this->pageOff = $n - $vis;
+        }
+    }
+
+    function finish() : void
+    {
+        settle($this->channel(), $this, $this->region);
+    }
+}
+
+public function select(
+    command::CLIContext $ctx,
+    string $title,
+    array<string> $choices
+) : array<string>
+{
+    return select($ctx, $title, $choices, .radio);
+}
+
+public function select(
+    command::CLIContext $ctx,
+    string $title,
+    array<string> $choices,
+    SelectKind $kind
+) : array<string>
+{
+    Select $q = Select($ctx, $title, $kind);
+    $q->choices($choices);
+
+    return $q->ask();
+}
+
+function needItems(Select $q) : void
+{
+    if ($q->items->empty()) {
+        die('command::element::Select: no choices');
+    }
+}
+
+function askLive(Select $q) : array<string>
+{
+    if (!drive($q->channel(), $q, $q->region, 'command::element::Select')) {
+        return askLine($q);
+    }
+
+    return collectPicks($q);
+}
+
+function askLine(Select $q) : array<string>
+{
+    $q->region->commit($q->numbered());
+    string? $line = std::io::readline();
+    string $text = '';
+
+    if ($line != null) {
+        $text = $line ?? '';
+    }
+
+    array<string>? $got = $q->tryAnswer($text);
+
+    if ($got == null) {
+        badLine($text);
+    }
+
+    array<string> $picked = $got ?? array<string>();
+    $q->region->commit(stepSummary($q->channel(), $q));
+
+    return $picked;
+}
+
+function badLine(const string& $line) : void
+{
+    if (lineBlank($line)) {
+        die('command::element::Select: that was empty, and there is no default');
+    }
+
+    die("command::element::Select: '{$line}' is not a choice");
+}

@@ -1,0 +1,326 @@
+/**
+ * What this terminal can do, and the SGR sequences everything draws with.
+ * Colour and unicode fail apart; width 0 means "unknown, the caller decides".
+ *
+ * One table of escape sequences, one styled() - two places spelling an SGR
+ * is two places for a theme change to land on one of them.
+ */
+
+namespace command;
+
+use std::env;
+
+public enum ColorChoice
+{
+    case auto;
+    case always;
+    case never;
+}
+
+public enum TerminalStream
+{
+    case stdout;
+    case stderr;
+    case stdin;
+}
+
+public struct TerminalCapabilities
+{
+    public bool $color;
+    public bool $unicode;
+    public int32 $width;
+    public bool $interactive;
+
+    constructor(bool $color, bool $unicode, int32 $width, bool $interactive)
+    {
+        $this->color = $color;
+        $this->unicode = $unicode;
+        $this->width = $width;
+        $this->interactive = $interactive;
+    }
+}
+
+public const SGR_RESET = "\x1b[0m";
+public const SGR_DIM = "\x1b[2m";
+public const SGR_BOLD = "\x1b[1m";
+public const SGR_ERROR = "\x1b[31m";
+public const SGR_WARNING = "\x1b[33m";
+public const SGR_INFO = "\x1b[34m";
+public const SGR_SECONDARY = "\x1b[36m";
+public const SGR_SUCCESS = "\x1b[32m";
+public const SGR_MUTED = "\x1b[90m";
+public const SGR_REVERSE = "\x1b[7m";
+
+/**
+ * What closes each of the above. A colour is put back to the terminal's own
+ * foreground, weight to normal, reverse to normal - never `SGR_RESET`.
+ *
+ * A full reset closes attributes this library never opened. Anything the
+ * surrounding program had set - a background, a weight from a shell prompt -
+ * is torn down by a bar it had nothing to do with, and stays down for
+ * everything printed after it.
+ */
+public const SGR_OFF_COLOR = "\x1b[39m";
+public const SGR_OFF_WEIGHT = "\x1b[22m";
+public const SGR_OFF_REVERSE = "\x1b[27m";
+
+/**
+ * DECTCEM. Not SGR, and so not gated on colour: a prompt draws its own caret
+ * into the frame, and the terminal's cursor parked at the end of that frame
+ * would be a second one. Interactivity is the only condition.
+ */
+public const CURSOR_HIDE = "\x1b[?25l";
+public const CURSOR_SHOW = "\x1b[?25h";
+
+/**
+ * How a live widget takes back the ground it drew on. EL erases the one line a
+ * LiveLine owns; ED erases the block a LiveRegion climbed to the top of.
+ *
+ * Here rather than in the widgets for the same reason the SGR set is: a
+ * terminal that needs a different erase is one table to change, and two
+ * widgets spelling it themselves is two places for that change to miss.
+ */
+public const CSI_ERASE_LINE = "\r\x1b[K";
+public const CSI_ERASE_DOWN = "\r\x1b[J";
+
+public function cursorUp(int32 $rows) : string
+{
+    if ($rows < 1) {
+        return '';
+    }
+
+    return "\x1b[{$rows}A";
+}
+
+public function plain() : TerminalCapabilities
+{
+    return TerminalCapabilities(false, false, 0, false);
+}
+
+public function styled(const string& $text, const string& $sgr, bool $color) : string
+{
+    if (!$color || $text->empty()) {
+        return $text;
+    }
+
+    string $out = "{$sgr}{$text}";
+    $out->append(sgrOff($sgr));
+
+    return $out;
+}
+
+/**
+ * The sequence that undoes `$sgr`, and only `$sgr`.
+ *
+ * Anything this library did not spell falls back to a full reset: it is the
+ * one answer that is never wrong, only heavier than it needs to be.
+ */
+public function sgrOff(const string& $sgr) : string
+{
+    if ($sgr == SGR_DIM || $sgr == SGR_BOLD) {
+        return SGR_OFF_WEIGHT;
+    }
+
+    if ($sgr == SGR_REVERSE) {
+        return SGR_OFF_REVERSE;
+    }
+
+    bool $paint = $sgr == SGR_ERROR
+        || $sgr == SGR_WARNING
+        || $sgr == SGR_INFO
+        || $sgr == SGR_SECONDARY
+        || $sgr == SGR_SUCCESS
+        || $sgr == SGR_MUTED;
+
+    if ($paint) {
+        return SGR_OFF_COLOR;
+    }
+
+    return SGR_RESET;
+}
+
+public function colorNamed(const string& $word) : ColorChoice?
+{
+    if ($word == 'auto') {
+        return .auto;
+    }
+
+    if ($word == 'always') {
+        return .always;
+    }
+
+    if ($word == 'never') {
+        return .never;
+    }
+
+    return null;
+}
+
+/**
+ * Resolve capabilities from facts the caller already has. Tests inject
+ * tty/width/env rather than mutating the process.
+ */
+public function resolveFrom(
+    ColorChoice $color,
+    bool $tty,
+    int32 $width,
+    bool $unicodeLocale,
+    const string& $nocolor,
+    const string& $force,
+    const string& $term
+) : TerminalCapabilities
+{
+    bool $useColor = false;
+
+    if ($color == ColorChoice::always) {
+        $useColor = true;
+    }
+    else if ($color == ColorChoice::never) {
+        $useColor = false;
+    }
+    else {
+        $useColor = environmentAllowsColor($tty, $nocolor, $force, $term);
+    }
+
+    bool $unicode = false;
+
+    if ($tty) {
+        $unicode = $unicodeLocale;
+    }
+
+    int32 $cols = 0;
+
+    if ($tty) {
+        $cols = $width;
+    }
+
+    return TerminalCapabilities($useColor, $unicode, $cols, $tty);
+}
+
+public function resolve(ColorChoice $color, TerminalStream $stream) : TerminalCapabilities
+{
+    std::io::stream $io = std::io::stderr;
+
+    if ($stream == TerminalStream::stdout) {
+        $io = std::io::stdout;
+    }
+    else if ($stream == TerminalStream::stdin) {
+        $io = std::io::stdin;
+    }
+
+    bool $tty = $io->isatty();
+    int32 $width = 0;
+
+    if ($tty) {
+        $width = columnsOf($io->fd());
+    }
+
+    return resolveFrom(
+        $color,
+        $tty,
+        $width,
+        environmentAllowsUnicode(),
+        envText('NO_COLOR'),
+        envText('CLICOLOR_FORCE'),
+        envText('TERM')
+    );
+}
+
+function environmentAllowsColor(
+    bool $tty,
+    const string& $nocolor,
+    const string& $force,
+    const string& $term
+) : bool
+{
+    if (!$nocolor->empty()) {
+        return false;
+    }
+
+    if (!$force->empty() && $force != '0') {
+        return true;
+    }
+
+    if ($term == 'dumb') {
+        return false;
+    }
+
+    return $tty;
+}
+
+function environmentAllowsUnicode() : bool
+{
+    if (!envText('WT_SESSION')->empty()) {
+        return true;
+    }
+
+    return localeIsUtf8();
+}
+
+function localeIsUtf8() : bool
+{
+    return mentionsUtf8('LC_ALL') || mentionsUtf8('LC_CTYPE') || mentionsUtf8('LANG');
+}
+
+function mentionsUtf8(const string& $key) : bool
+{
+    string $value = envText($key);
+
+    return $value->contains('UTF-8') || $value->contains('utf8');
+}
+
+function envText(const string& $key) : string
+{
+    string::view $value = guard env::var($key) else {
+        return '';
+    }
+
+    return str::from($value);
+}
+
+function columnsOf(int32 $fd) : int32
+{
+    string $columns = envText('COLUMNS');
+
+    if (!$columns->empty()) {
+        int32 $n = parseColumns($columns);
+
+        if ($n > 0) {
+            return $n;
+        }
+    }
+
+    int32 $n = std::io::stream($fd)->columns();
+
+    if ($n <= 0) {
+        return 0;
+    }
+
+    return $n;
+}
+
+function parseColumns(const string& $s) : int32
+{
+    if ($s->empty()) {
+        return 0;
+    }
+
+    int32 $n = 0;
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        uint8 $b = $s->byte($i);
+        int32 $wide = $b;
+        int32 $zero = CH_ZERO;
+        int32 $nine = CH_NINE;
+
+        if ($wide < $zero || $wide > $nine) {
+            return 0;
+        }
+
+        $n = $n * 10 + ($wide - $zero);
+        $i = $i + 1;
+    }
+
+    return $n;
+}

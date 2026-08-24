@@ -1,0 +1,449 @@
+/**
+ * Parser over a small greet Command. No terminal.
+ */
+
+use command;
+
+test no_command_is_a_refusal
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(array<string>()));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r) == 'No command given.', 'the sentence');
+}
+
+test unknown_command_names_the_list
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words1('nope')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains("'nope' is not a command"), 'names the word');
+    assert(errText($r)->contains("'build'"), 'names the list');
+}
+
+test help_short_circuits_a_missing_output
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words2('build', '--help')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->wantsHelp, 'help');
+    assert($r->parsed->hasCommand, 'build is still known');
+}
+
+test help_option_topic
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '--help', 'optimize')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->helpTopicId >= 0, 'topic');
+    assert($r->parsed->helpTopic == 'optimize', 'bare name');
+}
+
+test help_unknown_topic_still_draws_the_page
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '--help', 'main.eco')));
+
+    assert($r->error == null, 'asked for help');
+    assert($r->parsed->helpTopicId < 0, 'not an option');
+}
+
+test version_prints_nothing_else
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words1('--version')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->wantsVersion, 'version');
+}
+
+function errText(const command::Outcome& $r) : string
+{
+    if ($r->error == null) {
+        return '';
+    }
+
+    command::Error $e = $r->error ?? .noCommand;
+
+    return $e->message();
+}
+
+/**
+ * The handle the fixture would have kept, found by name. Tests build their
+ * command in a helper and read values back through `$parsed->value`, which
+ * wants an Arg and not a name.
+ */
+function argOf(const command::Command& $app, const string& $name) : command::Arg
+{
+    usize $i = 0;
+
+    while ($i < $app->options->count()) {
+        if ($app->options[$i]->name == $name) {
+            return command::Arg($app->options[$i]->id);
+        }
+
+        $i = $i + 1;
+    }
+
+    die("no {$name}");
+}
+
+test build_with_output
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', 'app')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->value(argOf($app, 'output')) == 'app', 'output');
+}
+
+test long_equals_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words2('build', '--output=app')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->value(argOf($app, 'output')) == 'app', 'equals');
+}
+
+test colour_alias_states_color
+{
+    command::Command $app = greet();
+    array<string> $w = array<string>();
+    $w[] = 'build';
+    $w[] = '-o';
+    $w[] = 'app';
+    $w[] = '--colour';
+    $w[] = 'always';
+    command::Outcome $r = $app->parse(argv($w));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->stated($app->color), 'stated');
+    assert($r->parsed->value($app->color) == 'always', 'always');
+}
+
+test unknown_optimize_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words4('build', '-o', 'app', '--optimize')));
+    command::Outcome $r2 = $app->parse(argv(words2('build', '--optimize=nope')));
+
+    assert($r2->error != null, 'refused');
+    assert(errText($r2)->contains('Expected one of'), 'lists values');
+}
+
+test clustered_short_is_refused
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words2('build', '-oh')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('is not an option'), 'short not single');
+}
+
+test dash_dash_value_is_not_a_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', '--silent')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('is an option'), 'looks like a flag');
+}
+
+test missing_required_output
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words1('build')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('needs'), 'required');
+}
+
+test repeated_link
+{
+    command::Command $app = greet();
+    array<string> $w = array<string>();
+    $w[] = 'build';
+    $w[] = '-o';
+    $w[] = 'app';
+    $w[] = '--link';
+    $w[] = 'curl';
+    $w[] = '--link';
+    $w[] = 'z';
+    command::Outcome $r = $app->parse(argv($w));
+
+    assert($r->error == null, 'ok');
+    array<string> $got = $r->parsed->values(argOf($app, 'link'));
+    assert($got->count() == 2, 'two');
+    assert($got[0] == 'curl', 'first');
+    assert($got[1] == 'z', 'second');
+}
+
+test tail_is_kept
+{
+    command::Command $app = greet();
+    array<string> $w = array<string>();
+    $w[] = 'build';
+    $w[] = '-o';
+    $w[] = 'app';
+    $w[] = '--';
+    $w[] = '--verbose';
+    command::Outcome $r = $app->parse(argv($w));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->sawSeparator, 'saw --');
+    assert($r->parsed->tail->count() == 1, 'one');
+    assert($r->parsed->tail[0] == '--verbose', 'program arg');
+}
+
+test tail_refused_when_disabled
+{
+    command::Command $app = greet();
+    $app->tail(false);
+    array<string> $w = array<string>();
+    $w[] = 'build';
+    $w[] = '-o';
+    $w[] = 'app';
+    $w[] = '--';
+    command::Outcome $r = $app->parse(argv($w));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains("does not take '--'"), 'separator');
+}
+
+test flag_after_positional_is_still_a_flag
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words4('build', 'main.eco', '-o', 'app')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->value(argOf($app, 'output')) == 'app', 'output after source');
+    assert($r->parsed->positionals->count() == 1, 'one source');
+}
+
+test color_on_a_bad_flag_is_still_stated
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('--color', 'always', '--nope')));
+
+    assert($r->error != null, 'unknown option');
+    assert($r->parsed->stated($app->color), 'partial fill');
+    assert($r->parsed->value($app->color) == 'always', 'the colour they asked for');
+}
+
+test silent_flag_takes_no_equals
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words2('build', '--help=1')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('takes no value'), 'flag');
+}
+
+test optimize_defaults_to_module
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', 'app')));
+
+    assert($r->error == null, 'ok');
+    assert(!$r->parsed->stated(argOf($app, 'optimize')), 'unstated');
+    assert($r->parsed->value(argOf($app, 'optimize')) == 'module', 'fallback');
+}
+
+test empty_equals_is_unknown_option
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words4('build', '-o', 'app', '--=')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('Unknown option'), 'not help');
+}
+
+test short_flag_is_not_a_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', '-v')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('is an option'), 'looks like a flag');
+}
+
+test require_implies_accept
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Subcommand $build = $app->command('build', 'b', 'b');
+    command::Subcommand $run = $app->command('run', 'r', 'r');
+    command::Flag $quiet = $app->flag('quiet', 'q', 'be quiet');
+    $app->require($quiet, $build);
+
+    command::Outcome $onRun = $app->parse(argv(words2('run', '--quiet')));
+    assert($onRun->error != null, 'run does not take it');
+    assert(errText($onRun)->contains('does not take'), 'not on run');
+
+    command::Outcome $onBuild = $app->parse(argv(words2('build', '--quiet')));
+    assert($onBuild->error == null, 'build accepts the required flag');
+}
+
+test root_positionals
+{
+    command::Command $app = command::Command('grep', '0.1.0', 'search');
+    $app->positional('<pattern>', 'the pattern', 'A regular expression.', 1, 1, '');
+
+    command::Outcome $ok = $app->parse(argv(words1('needle')));
+    assert($ok->error == null, 'one pattern');
+    assert($ok->parsed->positionals->count() == 1, 'kept');
+    assert($ok->parsed->positionals[0] == 'needle', 'the word');
+
+    command::Outcome $few = $app->parse(argv(array<string>()));
+    assert($few->error != null, 'needs a pattern');
+    assert(errText($few)->contains('needs'), 'too few');
+
+    command::Outcome $many = $app->parse(argv(words2('a', 'b')));
+    assert($many->error != null, 'only one');
+    assert(errText($many)->contains('too many'), 'too many');
+}
+
+test root_takes_no_positionals
+{
+    command::Command $app = command::Command('grep', '0.1.0', 'search');
+    command::Outcome $r = $app->parse(argv(words1('needle')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('takes no positional'), 'none');
+}
+
+test root_required_arg
+{
+    command::Command $app = command::Command('out', '0.1.0', 'write');
+    command::Arg $path = $app->arg('output', 'o', '<file>', 'the file');
+    $app->require($path);
+
+    command::Outcome $missing = $app->parse(argv(array<string>()));
+    assert($missing->error != null, 'needs output');
+    assert(errText($missing)->contains('needs'), 'required');
+
+    command::Outcome $ok = $app->parse(argv(words2('-o', 'app')));
+    assert($ok->error == null, 'stated');
+}
+
+test require_without_command_is_root_only
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Subcommand $build = $app->command('build', 'b', 'b');
+    command::Subcommand $run = $app->command('run', 'r', 'r');
+    command::Flag $quiet = $app->flag('quiet', 'q', 'be quiet');
+    $app->require($quiet);
+
+    command::Outcome $onBuild = $app->parse(argv(words1('build')));
+    assert($onBuild->error == null, 'build does not inherit the root require');
+
+    command::Outcome $onRun = $app->parse(argv(words1('run')));
+    assert($onRun->error == null, 'run does not inherit the root require');
+}
+
+test scoped_option_before_command_is_refused
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('--output', 'app', 'build')));
+
+    assert($r->error != null, 'refused');
+    assert(errText($r)->contains('does not take'), 'not on greet itself');
+}
+
+test negative_number_is_a_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', '-1')));
+
+    assert($r->error == null, 'ok');
+    assert($r->parsed->value(argOf($app, 'output')) == '-1', 'minus one');
+}
+
+test unknown_short_as_a_value
+{
+    command::Command $app = greet();
+    command::Outcome $r = $app->parse(argv(words3('build', '-o', '-z')));
+
+    assert($r->error == null, 'unknown short is a value');
+    assert($r->parsed->value(argOf($app, 'output')) == '-z', 'kept');
+}
+
+test exclude_pair
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Arg $json = $app->arg('json', '', '<path>', 'json');
+    command::Arg $xml = $app->arg('xml', '', '<path>', 'xml');
+    $app->exclude($json, $xml);
+
+    command::Outcome $ok = $app->parse(argv(words2('--json', 'a')));
+    assert($ok->error == null, 'one is fine');
+
+    command::Outcome $both = $app->parse(argv(words4('--json', 'a', '--xml', 'b')));
+    assert($both->error != null, 'two answers');
+    assert(errText($both)->contains('two answers'), 'exclusion sentence');
+}
+
+test value_on_is_command_specific
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Subcommand $build = $app->command('build', 'b', 'b');
+    command::Subcommand $run = $app->command('run', 'r', 'r');
+    command::Arg $opt = $app->arg('optimize', '', '<mode>', 'how hard');
+    $app->accept($opt, $build);
+    $app->accept($opt, $run);
+    array<command::OptionValue> $modes = array<command::OptionValue>();
+    $modes[] = command::OptionValue('module', 'each unit', '');
+    $modes[] = command::OptionValue('whole', 'merge', '');
+    $app->values($opt, $modes);
+    $app->valueOn($opt, 'whole', $build);
+
+    command::Outcome $onBuild = $app->parse(argv(words2('build', '--optimize=whole')));
+    assert($onBuild->error == null, 'build takes whole');
+
+    command::Outcome $onRun = $app->parse(argv(words2('run', '--optimize=whole')));
+    assert($onRun->error != null, 'run does not');
+    assert(errText($onRun)->contains('Expected one of'), 'lists values');
+
+    command::Outcome $before = $app->parse(argv(words2('--optimize=whole', 'build')));
+    assert($before->error != null, 'scoped option waits for the command');
+}
+
+#[tests: expects death]
+test duplicate_long_name_dies
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    $app->flag('help', '', 'again');
+}
+
+#[tests: expects death]
+test duplicate_short_dies
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    $app->flag('quiet', 'h', 'taken by help');
+}
+
+#[tests: expects death]
+test duplicate_alias_dies
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Arg $out = $app->arg('output', 'o', '<file>', 'out');
+    $app->alias($out, 'color');
+}
+
+test exclude_flags
+{
+    command::Command $app = command::Command('g', '0.1.0', 'x');
+    command::Flag $quiet = $app->flag('quiet', 'q', 'be quiet');
+    command::Flag $verbose = $app->flag('verbose', '', 'be loud');
+    $app->exclude($quiet, $verbose);
+
+    command::Outcome $ok = $app->parse(argv(words1('--quiet')));
+    assert($ok->error == null, 'one is fine');
+
+    command::Outcome $both = $app->parse(argv(words2('--quiet', '--verbose')));
+    assert($both->error != null, 'two answers');
+}

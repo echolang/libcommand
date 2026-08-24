@@ -1,0 +1,65 @@
+/**
+ * The one mutable trailing line. Progress and Spinner share this so they
+ * cannot drift, and a third live widget later does not invent a third
+ * CR+EL dialect.
+ *
+ * Vocabulary is carriage return and erase-to-end-of-line. Never cursor-up.
+ * Bytes go through the context, so a buffer-mode run is one transcript.
+ */
+
+namespace command::element;
+
+public class LiveLine
+{
+    public command::CLIContext $ctx;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->ctx = $ctx;
+    }
+
+    public const function interactive() : bool
+    {
+        return $this->ctx->caps->interactive;
+    }
+
+    public const function width() : int32
+    {
+        return command::liveWidth($this->ctx->caps);
+    }
+
+    public function paint(const string& $text) : void
+    {
+        if (!$this->ctx->caps->interactive) {
+            return;
+        }
+
+        string $seq = command::CSI_ERASE_LINE;
+        $seq->append($text);
+        $this->ctx->write($seq);
+    }
+
+    public function commit(const string& $text) : void
+    {
+        if ($this->ctx->caps->interactive) {
+            string $seq = command::CSI_ERASE_LINE;
+            $seq->append($text);
+            $seq->append(std::io::NEWLINE);
+            $this->ctx->write($seq);
+            return;
+        }
+
+        string $line = $text;
+        $line->append(std::io::NEWLINE);
+        $this->ctx->write($line);
+    }
+
+    public function erase() : void
+    {
+        if (!$this->ctx->caps->interactive) {
+            return;
+        }
+
+        $this->ctx->write(command::CSI_ERASE_LINE);
+    }
+}

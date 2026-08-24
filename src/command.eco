@@ -1,0 +1,682 @@
+/**
+ * What is an option, and which commands accept it. One row per flag; parse,
+ * usage, the page and every refusal read this. Adding a flag is adding a row.
+ *
+ * Command is a class because it has identity while you fill it: handles are
+ * indices into its arrays, and copying a half-built command would desynchronise
+ * them.
+ */
+
+namespace command;
+
+public const int32 ROOT_BIT = 1;
+
+public enum OptionArity
+{
+    case flag;
+    case value;
+    case repeated;
+}
+
+public struct OptionValue
+{
+    public string $name;
+    public int32 $commands;
+    public string $summary;
+    public string $description;
+
+    constructor(string $name, string $summary, string $description)
+    {
+        $this->name = $name;
+        $this->commands = 0;
+        $this->summary = $summary;
+        $this->description = $description;
+    }
+
+    public const function accepted(const Option& $option, int32 $bit) : bool
+    {
+        int32 $mask = $this->commands;
+
+        if ($mask == 0) {
+            $mask = $option->commands;
+        }
+
+        if ($mask == 0) {
+            return true;
+        }
+
+        return ($mask & $bit) != 0;
+    }
+}
+
+public struct Option
+{
+    public int32 $id;
+    public string $name;
+    public string $alias;
+    public string $shorthand;
+    public OptionArity $arity;
+    public string $category;
+    public int32 $commands;
+    public int32 $requiredBy;
+    public int32 $exclusion;
+    public string $metavar;
+    public string $fallback;
+    public string $summary;
+    public string $description;
+    public array<OptionValue> $values;
+
+    constructor(
+        int32 $id,
+        string $name,
+        string $alias,
+        string $shorthand,
+        OptionArity $arity,
+        string $category,
+        int32 $commands,
+        int32 $requiredBy,
+        int32 $exclusion,
+        string $metavar,
+        string $fallback,
+        string $summary,
+        string $description,
+        array<OptionValue> $values
+    )
+    {
+        $this->id = $id;
+        $this->name = $name;
+        $this->alias = $alias;
+        $this->shorthand = $shorthand;
+        $this->arity = $arity;
+        $this->category = $category;
+        $this->commands = $commands;
+        $this->requiredBy = $requiredBy;
+        $this->exclusion = $exclusion;
+        $this->metavar = $metavar;
+        $this->fallback = $fallback;
+        $this->summary = $summary;
+        $this->description = $description;
+        $this->values = $values;
+    }
+
+    public const function takesValue() : bool
+    {
+        return $this->arity != OptionArity::flag;
+    }
+
+    public const function flagNames() : string
+    {
+        string $names = '';
+
+        if (!$this->shorthand->empty()) {
+            $names = "-{$this->shorthand}, ";
+        }
+
+        $names->append("--{$this->name}");
+
+        if (!$this->alias->empty()) {
+            $names->append(", --{$this->alias}");
+        }
+
+        return $names;
+    }
+
+    public const function spelling() : string
+    {
+        string $names = $this->flagNames();
+
+        if ($this->metavar->empty()) {
+            return $names;
+        }
+
+        return "{$names} {$this->metavar}";
+    }
+
+    public const function valueCsv() : string
+    {
+        string $joined = '';
+        usize $i = 0;
+
+        while ($i < $this->values->count()) {
+            if ($i > 0) {
+                $joined->append(', ');
+            }
+
+            $joined->append($this->values[$i]->name);
+            $i = $i + 1;
+        }
+
+        return $joined;
+    }
+
+    public const function accepted(int32 $bit) : bool
+    {
+        if ($this->commands == 0) {
+            return true;
+        }
+
+        return ($this->commands & $bit) != 0;
+    }
+}
+
+public struct Positionals
+{
+    public string $metavar;
+    public string $summary;
+    public string $description;
+    public string $category;
+    public int32 $min;
+    public int32 $max;
+
+    constructor()
+    {
+        $this->metavar = '';
+        $this->summary = '';
+        $this->description = '';
+        $this->category = '';
+        $this->min = 0;
+        $this->max = 0;
+    }
+
+    constructor(
+        string $metavar,
+        string $summary,
+        string $description,
+        string $category,
+        int32 $min,
+        int32 $max
+    )
+    {
+        $this->metavar = $metavar;
+        $this->summary = $summary;
+        $this->description = $description;
+        $this->category = $category;
+        $this->min = $min;
+        $this->max = $max;
+    }
+}
+
+public struct SubcommandInfo
+{
+    public int32 $id;
+    public int32 $bit;
+    public string $name;
+    public string $summary;
+    public string $description;
+    public Positionals $positionals;
+
+    constructor(
+        int32 $id,
+        int32 $bit,
+        string $name,
+        string $summary,
+        string $description,
+        Positionals $positionals
+    )
+    {
+        $this->id = $id;
+        $this->bit = $bit;
+        $this->name = $name;
+        $this->summary = $summary;
+        $this->description = $description;
+        $this->positionals = $positionals;
+    }
+}
+
+public struct Subcommand
+{
+    public int32 $id;
+    public int32 $bit;
+
+    constructor(int32 $id, int32 $bit)
+    {
+        $this->id = $id;
+        $this->bit = $bit;
+    }
+}
+
+public struct Flag
+{
+    public int32 $id;
+
+    constructor(int32 $id)
+    {
+        $this->id = $id;
+    }
+}
+
+public struct Arg
+{
+    public int32 $id;
+
+    constructor(int32 $id)
+    {
+        $this->id = $id;
+    }
+}
+
+public class Command
+{
+    public string $name;
+    public string $version;
+    public string $summary;
+    public bool $acceptsTail;
+    public Positionals $positionals;
+    public array<SubcommandInfo> $commands;
+    public array<Option> $options;
+    public Flag $help;
+    public Flag $versionFlag;
+    public Arg $color;
+    public int32 $nextBit;
+    public int32 $nextExclusion;
+
+    constructor(string $name, string $version, string $summary)
+    {
+        $this->name = $name;
+        $this->version = $version;
+        $this->summary = $summary;
+        $this->acceptsTail = true;
+        $this->positionals = Positionals();
+        $this->commands = array<SubcommandInfo>();
+        $this->options = array<Option>();
+        $this->nextBit = 2;
+        $this->nextExclusion = 1;
+        $this->help = Flag(-1);
+        $this->versionFlag = Flag(-1);
+        $this->color = Arg(-1);
+
+        $this->help = $this->flag('help', 'h', 'print this page, or one option in full');
+        $this->describe($this->help, "Print a page. Which page depends on what you put around it:\n  {$name} --help\n  {$name} <command> --help\n  {$name} <command> --help <option>\nThe last form is where the prose lives: the compact page has one line per option, and the paragraphs, the values and the gotchas are one command further in.\nThe option name goes in bare, without its dashes.");
+        $this->versionFlag = $this->flag('version', 'v', 'print the version');
+        $this->describe($this->versionFlag, "Print the version this program was built as, and exit:\n  {$name} --version");
+
+        array<OptionValue> $colors = array<OptionValue>();
+        $colors[] = OptionValue('auto', 'a terminal, and nothing else', 'Colour a terminal and leave a pipe alone.');
+        $colors[] = OptionValue('always', 'even into a file or a pipe', 'Put escape sequences in the stream, which is what a renderer downstream wants.');
+        $colors[] = OptionValue('never', 'never', 'No escape sequences, even on a terminal.');
+
+        $this->color = $this->arg('color', '', '<auto|always|never>', 'colourise the page and refusals');
+        $this->alias($this->color, 'colour');
+        $this->fallback($this->color, 'auto');
+        $this->values($this->color, $colors);
+        $this->describe($this->color, "Colourise the help page and the argv refusals:\n  {$name} --color always --help\n'always' puts escape sequences into a file or a pipe. 'never' is the other direction, and 'auto' colours a terminal and nothing else.\nNO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured.");
+    }
+
+    public function command(string $name, string $summary, string $description) : Subcommand
+    {
+        if ($this->nextBit <= 0) {
+            die('command::Command: too many subcommands');
+        }
+
+        int32 $id = i32Of($this->commands->count());
+        int32 $bit = $this->nextBit;
+        $this->nextBit = $this->nextBit * 2;
+        $this->commands[] = SubcommandInfo($id, $bit, $name, $summary, $description, Positionals());
+
+        return Subcommand($id, $bit);
+    }
+
+    public function positional(
+        string $metavar,
+        string $summary,
+        string $description,
+        int32 $min,
+        int32 $max,
+        string $category
+    ) : void
+    {
+        $this->positionals = Positionals($metavar, $summary, $description, $category, $min, $max);
+    }
+
+    public function positional(
+        Subcommand $cmd,
+        string $metavar,
+        string $summary,
+        string $description,
+        int32 $min,
+        int32 $max,
+        string $category
+    ) : void
+    {
+        SubcommandInfo $row = $this->commands[$cmd->id];
+        $row->positionals = Positionals($metavar, $summary, $description, $category, $min, $max);
+        $this->commands[$cmd->id] = $row;
+    }
+
+    public function tail(bool $accepts) : void
+    {
+        $this->acceptsTail = $accepts;
+    }
+
+    public function flag(string $name, string $shorthand, string $summary) : Flag
+    {
+        int32 $id = thisAdd($this, $name, '', $shorthand, .flag, $summary);
+
+        return Flag($id);
+    }
+
+    public function arg(string $name, string $shorthand, string $metavar, string $summary) : Arg
+    {
+        int32 $id = thisAdd($this, $name, $metavar, $shorthand, .value, $summary);
+
+        return Arg($id);
+    }
+
+    public function repeat(string $name, string $shorthand, string $metavar, string $summary) : Arg
+    {
+        int32 $id = thisAdd($this, $name, $metavar, $shorthand, .repeated, $summary);
+
+        return Arg($id);
+    }
+
+    public function alias(Flag $opt, string $alias) : void
+    {
+        setAlias($this, $opt->id, $alias);
+    }
+
+    public function alias(Arg $opt, string $alias) : void
+    {
+        setAlias($this, $opt->id, $alias);
+    }
+
+    public function describe(Flag $opt, string $description) : void
+    {
+        setDescription($this, $opt->id, $description);
+    }
+
+    public function describe(Arg $opt, string $description) : void
+    {
+        setDescription($this, $opt->id, $description);
+    }
+
+    public function category(Flag $opt, string $heading) : void
+    {
+        setCategory($this, $opt->id, $heading);
+    }
+
+    public function category(Arg $opt, string $heading) : void
+    {
+        setCategory($this, $opt->id, $heading);
+    }
+
+    public function fallback(Arg $opt, string $value) : void
+    {
+        Option $row = $this->options[$opt->id];
+        $row->fallback = $value;
+        $this->options[$opt->id] = $row;
+    }
+
+    public function accept(Flag $opt, Subcommand $cmd) : void
+    {
+        orCommands($this, $opt->id, $cmd->bit);
+    }
+
+    public function accept(Arg $opt, Subcommand $cmd) : void
+    {
+        orCommands($this, $opt->id, $cmd->bit);
+    }
+
+    public function require(Flag $opt) : void
+    {
+        orRequired($this, $opt->id, ROOT_BIT);
+    }
+
+    public function require(Arg $opt) : void
+    {
+        orRequired($this, $opt->id, ROOT_BIT);
+    }
+
+    public function require(Flag $opt, Subcommand $cmd) : void
+    {
+        orRequired($this, $opt->id, $cmd->bit);
+        orCommands($this, $opt->id, $cmd->bit);
+    }
+
+    public function require(Arg $opt, Subcommand $cmd) : void
+    {
+        orRequired($this, $opt->id, $cmd->bit);
+        orCommands($this, $opt->id, $cmd->bit);
+    }
+
+    public function exclude(Arg $a, Arg $b) : void
+    {
+        excludeIds($this, $a->id, $b->id);
+    }
+
+    public function exclude(Flag $a, Flag $b) : void
+    {
+        excludeIds($this, $a->id, $b->id);
+    }
+
+    public function values(Arg $opt, array<OptionValue> $values) : void
+    {
+        Option $row = $this->options[$opt->id];
+        $row->values = $values;
+        $this->options[$opt->id] = $row;
+    }
+
+    public function valueOn(Arg $opt, string $name, Subcommand $cmd) : void
+    {
+        Option $row = $this->options[$opt->id];
+        usize $i = 0;
+
+        while ($i < $row->values->count()) {
+            if ($row->values[$i]->name == $name) {
+                OptionValue $value = $row->values[$i];
+                $value->commands = $value->commands | $cmd->bit;
+                $row->values[$i] = $value;
+                $this->options[$opt->id] = $row;
+                return;
+            }
+
+            $i = $i + 1;
+        }
+
+        die("command::Command: unknown value '{$name}'");
+    }
+
+    public const function parse(const array<string>& $argv) : Outcome
+    {
+        Parser $parser = Parser($this);
+
+        return $parser->parse($argv);
+    }
+
+    public const function optionForLong(const string& $name) : Option?
+    {
+        usize $i = 0;
+
+        while ($i < $this->options->count()) {
+            if ($this->options[$i]->name == $name) {
+                return $this->options[$i];
+            }
+
+            if (!$this->options[$i]->alias->empty() && $this->options[$i]->alias == $name) {
+                return $this->options[$i];
+            }
+
+            $i = $i + 1;
+        }
+
+        return null;
+    }
+
+    public const function optionForShort(const string& $ch) : Option?
+    {
+        if ($ch->size() != 1) {
+            return null;
+        }
+
+        usize $i = 0;
+
+        while ($i < $this->options->count()) {
+            if ($this->options[$i]->shorthand == $ch) {
+                return $this->options[$i];
+            }
+
+            $i = $i + 1;
+        }
+
+        return null;
+    }
+
+    public const function subcommandForWord(const string& $word) : SubcommandInfo?
+    {
+        usize $i = 0;
+
+        while ($i < $this->commands->count()) {
+            if ($this->commands[$i]->name == $word) {
+                return $this->commands[$i];
+            }
+
+            $i = $i + 1;
+        }
+
+        return null;
+    }
+
+    public const function commandWordList() : string
+    {
+        string $joined = '';
+        usize $i = 0;
+        usize $n = $this->commands->count();
+
+        while ($i < $n) {
+            if ($i > 0) {
+                if ($i + 1 == $n) {
+                    $joined->append(' or ');
+                }
+                else {
+                    $joined->append(', ');
+                }
+            }
+
+            $joined->append("'{$this->commands[$i]->name}'");
+            $i = $i + 1;
+        }
+
+        return $joined;
+    }
+}
+
+/**
+ * A registered option, with everything that is not structural left empty -
+ * `fallback`, `describe`, `category` and the rest are the builder's job, and a
+ * parameter here that every caller passes `''` is not a configuration point.
+ */
+function thisAdd(
+    Command $app,
+    string $name,
+    string $metavar,
+    string $shorthand,
+    OptionArity $arity,
+    string $summary
+) : int32
+{
+    rejectTaken($app, $name, $shorthand);
+
+    int32 $id = i32Of($app->options->count());
+    array<OptionValue> $none = array<OptionValue>();
+    $app->options[] = Option(
+        $id,
+        $name,
+        '',
+        $shorthand,
+        $arity,
+        'General',
+        0,
+        0,
+        0,
+        $metavar,
+        '',
+        $summary,
+        '',
+        $none
+    );
+
+    return $id;
+}
+
+function setAlias(Command $app, int32 $id, string $alias) : void
+{
+    if ($app->optionForLong($alias) != null) {
+        die("command::Command: --{$alias} is already taken");
+    }
+
+    Option $row = $app->options[$id];
+    $row->alias = $alias;
+    $app->options[$id] = $row;
+}
+
+function rejectTaken(Command $app, const string& $name, const string& $shorthand) : void
+{
+    if ($app->optionForLong($name) != null) {
+        die("command::Command: --{$name} is already taken");
+    }
+
+    if ($shorthand->empty()) {
+        return;
+    }
+
+    if ($app->optionForShort($shorthand) != null) {
+        die("command::Command: -{$shorthand} is already taken");
+    }
+}
+
+function excludeIds(Command $app, int32 $a, int32 $b) : void
+{
+    if ($a == $b) {
+        die('command::Command: exclude needs two options');
+    }
+
+    Option $left = $app->options[$a];
+    Option $right = $app->options[$b];
+
+    if ($left->exclusion != 0 && $right->exclusion != 0 && $left->exclusion != $right->exclusion) {
+        die('command::Command: exclude would merge two groups');
+    }
+
+    int32 $group = $left->exclusion;
+
+    if ($group == 0) {
+        $group = $right->exclusion;
+    }
+
+    if ($group == 0) {
+        $group = $app->nextExclusion;
+        $app->nextExclusion = $app->nextExclusion + 1;
+    }
+
+    $left->exclusion = $group;
+    $right->exclusion = $group;
+    $app->options[$a] = $left;
+    $app->options[$b] = $right;
+}
+
+function setDescription(Command $app, int32 $id, string $description) : void
+{
+    Option $row = $app->options[$id];
+    $row->description = $description;
+    $app->options[$id] = $row;
+}
+
+function setCategory(Command $app, int32 $id, string $heading) : void
+{
+    Option $row = $app->options[$id];
+    $row->category = $heading;
+    $app->options[$id] = $row;
+}
+
+function orCommands(Command $app, int32 $id, int32 $bit) : void
+{
+    Option $row = $app->options[$id];
+    $row->commands = $row->commands | $bit;
+    $app->options[$id] = $row;
+}
+
+function orRequired(Command $app, int32 $id, int32 $bit) : void
+{
+    Option $row = $app->options[$id];
+    $row->requiredBy = $row->requiredBy | $bit;
+    $app->options[$id] = $row;
+}

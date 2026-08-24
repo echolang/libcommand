@@ -1,0 +1,89 @@
+/**
+ * Shared greet table, argv helpers and terminal fixtures for the test suite.
+ */
+
+use command;
+
+function greet() : command::Command
+{
+    command::Command $app = command::Command('greet', '0.1.0', 'say hello');
+    command::Subcommand $build = $app->command('build', 'compile a native executable', 'Compile it.');
+    $app->positional($build, '<sources...>', 'the files', 'The sources.', 0, -1, 'What is built');
+
+    command::Arg $out = $app->arg('output', 'o', '<file>', 'where the executable is written');
+    $app->category($out, 'What is built');
+    $app->accept($out, $build);
+    $app->require($out, $build);
+    $app->describe($out, 'The path of the binary.');
+
+    command::Arg $opt = $app->arg('optimize', '', '<mode>', 'how hard');
+    $app->category($opt, 'How it is built');
+    $app->accept($opt, $build);
+    $app->fallback($opt, 'module');
+    array<command::OptionValue> $modes = array<command::OptionValue>();
+    $modes[] = command::OptionValue('none', 'skip the pipeline', 'Skip it.');
+    $modes[] = command::OptionValue('module', 'each unit on its own', 'The default.');
+    $modes[] = command::OptionValue('whole', 'merge every unit', 'Then optimize.');
+    $app->values($opt, $modes);
+
+    command::Arg $link = $app->repeat('link', '', '<requirement>', 'add a link requirement');
+    $app->accept($link, $build);
+
+    return $app;
+}
+
+function argv(const array<string>& $rest) : array<string>
+{
+    array<string> $a = array<string>();
+    $a[] = 'greet';
+    usize $i = 0;
+
+    while ($i < $rest->count()) {
+        $a[] = $rest[$i];
+        $i = $i + 1;
+    }
+
+    return $a;
+}
+
+function words1(const string& $a) : array<string>
+{
+    array<string> $w = array<string>();
+    $w[] = $a;
+    return $w;
+}
+
+function words2(const string& $a, const string& $b) : array<string>
+{
+    array<string> $w = words1($a);
+    $w[] = $b;
+    return $w;
+}
+
+function words3(const string& $a, const string& $b, const string& $c) : array<string>
+{
+    array<string> $w = words2($a, $b);
+    $w[] = $c;
+    return $w;
+}
+
+function words4(const string& $a, const string& $b, const string& $c, const string& $d) : array<string>
+{
+    array<string> $w = words3($a, $b, $c);
+    $w[] = $d;
+    return $w;
+}
+
+/**
+ * The terminal the prompt tests type at: interactive, unicode, no colour,
+ * and narrow enough that 40 columns is a real constraint on a row.
+ */
+function promptCaps() : command::TerminalCapabilities
+{
+    return command::TerminalCapabilities(false, true, 40, true);
+}
+
+function promptCtx() : command::CLIContext
+{
+    return .buffer(promptCaps());
+}

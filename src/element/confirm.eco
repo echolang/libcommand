@@ -1,0 +1,254 @@
+/**
+ * A yes or no.
+ *
+ * Interactive: left and right move, 'y' and 'n' answer outright, enter
+ * confirms. Otherwise the question and a line of stdin, where anything
+ * starting with 'y' is yes and anything starting with 'n' is no.
+ */
+
+namespace command::element;
+
+public class Confirm : Step
+{
+    public command::CLIContext $ctx;
+    public string $title;
+    public bool $value;
+    public string $yes;
+    public string $no;
+    public LiveRegion $region;
+
+    constructor(command::CLIContext $ctx, string $title)
+    {
+        $this->seat($ctx, $title, true);
+    }
+
+    constructor(command::CLIContext $ctx, string $title, bool $start)
+    {
+        $this->seat($ctx, $title, $start);
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    public const function head() : string
+    {
+        return $this->title;
+    }
+
+    public const function body(const StepContext& $ctx) : array<string>
+    {
+        return oneRow(confirmRow($this, $ctx));
+    }
+
+    public const function summary(const StepContext& $ctx) : array<string>
+    {
+        return oneRow(command::styled(confirmWord($this), command::SGR_DIM, $ctx->caps->color));
+    }
+
+    /** Rename the two answers, for a question they do not fit. */
+    public function words(string $yes, string $no) : void
+    {
+        $this->yes = $yes;
+        $this->no = $no;
+    }
+
+    public function ask() : bool
+    {
+        $this->ctx->gap();
+
+        if ($this->region->drivable()) {
+            return askLiveConfirm($this);
+        }
+
+        return askLineConfirm($this);
+    }
+
+    public function frame() : string
+    {
+        return stepFrame($this->channel(), $this, StepState::active);
+    }
+
+    public function result() : bool
+    {
+        return $this->value;
+    }
+
+    public function feed(const KeyEvent& $event) : bool
+    {
+        if ($event->key == Key::enter) {
+            $this->finish();
+            return true;
+        }
+
+        if ($event->key == Key::text) {
+            bool? $said = yesOrNo($event->text);
+
+            if ($said != null) {
+                $this->value = $said ?? true;
+                $this->finish();
+                return true;
+            }
+        }
+
+        applyConfirm($this, $event);
+        $this->region->paint($this->frame());
+
+        return false;
+    }
+
+    public function feed(Key $key) : bool
+    {
+        return $this->feed(KeyEvent($key));
+    }
+
+    function seat(
+        command::CLIContext $ctx,
+        string $title,
+        bool $start
+    ) : void
+    {
+        $this->ctx = $ctx;
+        $this->title = $title;
+        $this->value = $start;
+        $this->yes = 'Yes';
+        $this->no = 'No';
+        $this->region = LiveRegion($ctx);
+    }
+
+    function finish() : void
+    {
+        settle($this->channel(), $this, $this->region);
+    }
+}
+
+/** Which of the two words this answer is, wherever it is spelled out. */
+function confirmWord(const Confirm& $c) : string
+{
+    if ($c->value) {
+        return $c->yes;
+    }
+
+    return $c->no;
+}
+
+public function confirm(command::CLIContext $ctx, string $title) : bool
+{
+    Confirm $c = Confirm($ctx, $title);
+
+    return $c->ask();
+}
+
+function confirmRow(const Confirm& $c, const StepContext& $ctx) : string
+{
+    string $row = confirmHalf($c, $ctx, $c->yes, $c->value);
+    $row->append(' / ');
+    $row->append(confirmHalf($c, $ctx, $c->no, !$c->value));
+
+    return $row;
+}
+
+function confirmHalf(
+    const Confirm& $c,
+    const StepContext& $ctx,
+    const string& $label,
+    bool $on
+) : string
+{
+    string $glyph = $ctx->theme->radioOff;
+
+    if ($on) {
+        $glyph = $ctx->theme->radioOn;
+    }
+
+    string $half = "{$glyph}{$label}";
+
+    if ($ctx->muted) {
+        if ($on) {
+            // same split as a Select row in a run: the marker is coloured and
+            // the word is left alone, so the two answers stay equally legible
+            string $lit = command::styled($glyph, command::SGR_SUCCESS, $ctx->caps->color);
+
+            return "{$lit}{$label}";
+        }
+
+        return command::styled($half, command::SGR_DIM, $ctx->caps->color);
+    }
+
+    if ($on) {
+        return command::styled($half, command::SGR_INFO, $ctx->caps->color);
+    }
+
+    return $half;
+}
+
+function applyConfirm(Confirm $c, const KeyEvent& $event) : void
+{
+    Key $key = $event->key;
+
+    bool $moved = $key == Key::left
+        || $key == Key::right
+        || $key == Key::up
+        || $key == Key::down
+        || $key == Key::space;
+
+    if ($moved) {
+        $c->value = !$c->value;
+    }
+}
+
+/**
+ * The first letter is the whole answer. Anything else is not an answer, and
+ * the caller decides whether that is a refusal or a shrug.
+ */
+function yesOrNo(const string& $word) : bool?
+{
+    if ($word->empty()) {
+        return null;
+    }
+
+    string $first = str::lower($word->sub(0, 1));
+
+    if ($first == 'y') {
+        return true;
+    }
+
+    if ($first == 'n') {
+        return false;
+    }
+
+    return null;
+}
+
+function askLiveConfirm(Confirm $c) : bool
+{
+    if (!drive($c->channel(), $c, $c->region, 'command::element::Confirm')) {
+        return askLineConfirm($c);
+    }
+
+    return $c->value;
+}
+
+function askLineConfirm(Confirm $c) : bool
+{
+    string $fallback = confirmWord($c);
+    $c->region->commit($c->channel()->askRow("{$c->title} [{$fallback}]"));
+
+    string? $line = std::io::readline();
+    string $text = '';
+
+    if ($line != null) {
+        $text = $line ?? '';
+    }
+
+    bool? $said = yesOrNo(str::trim($text));
+
+    if ($said != null) {
+        $c->value = $said ?? true;
+    }
+
+    $c->region->commit(stepSummary($c->channel(), $c));
+
+    return $c->value;
+}

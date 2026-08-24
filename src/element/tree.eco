@@ -1,0 +1,77 @@
+/**
+ * A tree of labels. Data: you build the children arrays, then render.
+ */
+
+namespace command::element;
+
+public struct Node
+{
+    public string $label;
+    public array<Node> $children;
+
+    constructor(string $label)
+    {
+        $this->label = $label;
+        $this->children = array<Node>();
+    }
+}
+
+public class Tree
+{
+    public command::CLIContext $ctx;
+    public Node $root;
+    public string $captured;
+
+    constructor(command::CLIContext $ctx, string $label)
+    {
+        $this->ctx = $ctx;
+        $this->root = Node($label);
+        $this->captured = '';
+    }
+
+    public const function render() : string
+    {
+        string $out = '';
+        $out->append($this->root->label);
+        $out->append(std::io::NEWLINE);
+        writeChildren($out, $this->root->children, '', $this->ctx->caps);
+
+        return $out;
+    }
+
+    public function display() : void
+    {
+        string $page = $this->render();
+        writeOrCapture($this->ctx, $this->captured, $page);
+    }
+}
+
+function writeChildren(
+    string& $out,
+    const array<Node>& $kids,
+    const string& $prefix,
+    const command::TerminalCapabilities& $caps
+) : void
+{
+    command::TreeTheme $theme = command::treeTheme($caps->unicode);
+    usize $i = 0;
+    usize $n = $kids->count();
+
+    while ($i < $n) {
+        bool $last = $i + 1 == $n;
+        string $next = $theme->pipe;
+        string $branch = $theme->branch;
+
+        if ($last) {
+            $next = $theme->blank;
+            $branch = $theme->last;
+        }
+
+        $out->append($prefix);
+        $out->append($branch);
+        $out->append($kids[$i]->label);
+        $out->append(std::io::NEWLINE);
+        writeChildren($out, $kids[$i]->children, "{$prefix}{$next}", $caps);
+        $i = $i + 1;
+    }
+}

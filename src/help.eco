@@ -1,0 +1,529 @@
+/**
+ * How an option is spelled back to a human. The page, one option, a usage
+ * line, a refusal. Help is an answer and goes to stdout; a refusal is the
+ * mirror and goes to stderr.
+ */
+
+namespace command;
+
+public function renderVersion(const Command& $app) : string
+{
+    string $out = $app->version;
+    $out->append(std::io::NEWLINE);
+
+    return $out;
+}
+
+public function renderUsage(
+    const Command& $app,
+    const Parsed& $p,
+    CLIContext $ctx
+) : string
+{
+    return renderUsage($app, $p, $ctx->caps);
+}
+
+public function renderUsage(
+    const Command& $app,
+    const Parsed& $p,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+    writeHeading($out, 'Usage', $caps);
+    writeUsageLines($out, $app, $p);
+
+    return $out;
+}
+
+public function renderError(
+    Error $e,
+    const Command& $app,
+    const Parsed& $p,
+    CLIContext $ctx
+) : string
+{
+    return renderError($e, $app, $p, $ctx->caps);
+}
+
+public function renderError(
+    Error $e,
+    const Command& $app,
+    const Parsed& $p,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+    string $badge = styled('error', SGR_ERROR, $caps->color);
+    $out->append("{$badge}: {$e->message()}");
+    $out->append(std::io::NEWLINE);
+    $out->append(std::io::NEWLINE);
+    writeHeading($out, 'Usage', $caps);
+    writeUsageLines($out, $app, $p);
+    $out->append(std::io::NEWLINE);
+
+    if (!$p->hasCommand) {
+        writeWrapped($out, "Run '{$app->name} --help' to see what {$app->name} can do.", 0, $caps);
+    }
+    else {
+        string $who = $p->subject($app);
+        writeWrapped($out, "Run '{$app->name} {$who} --help' for what this command accepts.", 0, $caps);
+    }
+
+    return $out;
+}
+
+public function renderHelp(
+    const Command& $app,
+    const Parsed& $p,
+    CLIContext $ctx
+) : string
+{
+    return renderHelp($app, $p, $ctx->caps);
+}
+
+public function renderHelp(
+    const Command& $app,
+    const Parsed& $p,
+    const TerminalCapabilities& $caps
+) : string
+{
+    if ($p->helpTopicId >= 0) {
+        return renderOptionHelp($app, $p, $app->options[$p->helpTopicId], $caps);
+    }
+
+    return renderHelpPage($app, $p, $caps);
+}
+
+function renderHelpPage(
+    const Command& $app,
+    const Parsed& $p,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+
+    // one measuring pass over every option and value on the page. both blocks
+    // below line their summaries up at the same column, and measuring twice is
+    // how they would come to disagree
+    int32 $column = summaryColumn($app, $p, $caps);
+
+    if (!$p->hasCommand) {
+        writeWrapped($out, "{$app->name} {$app->version} - {$app->summary}.", 0, $caps);
+        $out->append(std::io::NEWLINE);
+        writeHeading($out, 'Usage', $caps);
+        writeUsageLines($out, $app, $p);
+        $out->append(std::io::NEWLINE);
+
+        if ($app->commands->count() > 0) {
+            writeHeading($out, 'Commands', $caps);
+            usize $i = 0;
+
+            while ($i < $app->commands->count()) {
+                string $cmdName = styled($app->commands[$i]->name, SGR_INFO, $caps->color);
+                writeRow(
+                    $out,
+                    "  {$cmdName}",
+                    2 + textWidth($app->commands[$i]->name),
+                    $app->commands[$i]->summary,
+                    '',
+                    $column,
+                    $caps
+                );
+                $i = $i + 1;
+            }
+        }
+
+        writePositionalBlock($out, $app->positionals, $caps);
+        writeCategories($out, $app, $p, $column, $caps);
+        $out->append(std::io::NEWLINE);
+
+        if ($app->commands->count() > 0) {
+            writeWrapped($out, "Run '{$app->name} <command> --help' for what a command accepts.", 0, $caps);
+        }
+
+        return $out;
+    }
+
+    SubcommandInfo $info = $app->commands[$p->command->id];
+    writeWrapped($out, "{$app->name} {$info->name} - {$info->summary}.", 0, $caps);
+    $out->append(std::io::NEWLINE);
+    writeHeading($out, 'Usage', $caps);
+    writeUsageLines($out, $app, $p);
+    $out->append(std::io::NEWLINE);
+    writeWrapped($out, $info->description, 0, $caps);
+    writePositionalBlock($out, $info->positionals, $caps);
+
+    writeCategories($out, $app, $p, $column, $caps);
+    $out->append(std::io::NEWLINE);
+    writeWrapped(
+        $out,
+        "Run '{$app->name} {$info->name} --help <option>' for the full description of one option, for example '{$app->name} {$info->name} --help color'.",
+        0,
+        $caps
+    );
+
+    return $out;
+}
+
+function renderOptionHelp(
+    const Command& $app,
+    const Parsed& $p,
+    const Option& $option,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+    writeHeading($out, $option->spelling(), $caps);
+    $out->append(std::io::NEWLINE);
+    writeWrapped($out, $option->description, 4, $caps);
+
+    usize $i = 0;
+
+    while ($i < $option->values->count()) {
+        $out->append(std::io::NEWLINE);
+        $out->append('    ');
+        $out->append(styled($option->values[$i]->name, SGR_SECONDARY, $caps->color));
+        $out->append(std::io::NEWLINE);
+        writeWrapped($out, $option->values[$i]->description, 4, $caps);
+        $i = $i + 1;
+    }
+
+    $out->append(std::io::NEWLINE);
+
+    if ($option->commands == 0) {
+        writeWrapped($out, 'Accepted by: every command.', 0, $caps);
+    }
+    else {
+        string $who = acceptedCommands($app, $option);
+        writeWrapped($out, "Accepted by: {$who}.", 0, $caps);
+    }
+
+    if (!$option->fallback->empty()) {
+        writeWrapped($out, "Defaults to '{$option->fallback}'.", 0, $caps);
+    }
+
+    return $out;
+}
+
+function writeUsageLines(string& $out, const Command& $app, const Parsed& $p) : void
+{
+    if ($p->hasCommand) {
+        $out->append("  ");
+        $out->append(usageOf($app, $app->commands[$p->command->id]));
+        $out->append(std::io::NEWLINE);
+        return;
+    }
+
+    if ($app->commands->count() == 0) {
+        string $line = "  {$app->name} [options]";
+
+        if (!$app->positionals->metavar->empty()) {
+            $line->append(" {$app->positionals->metavar}");
+        }
+
+        $out->append($line);
+        $out->append(std::io::NEWLINE);
+        return;
+    }
+
+    $out->append("  {$app->name} <command> [options]");
+    $out->append(std::io::NEWLINE);
+    $out->append(std::io::NEWLINE);
+    usize $i = 0;
+
+    while ($i < $app->commands->count()) {
+        $out->append("  ");
+        $out->append(usageOf($app, $app->commands[$i]));
+        $out->append(std::io::NEWLINE);
+        $i = $i + 1;
+    }
+}
+
+function usageOf(const Command& $app, const SubcommandInfo& $info) : string
+{
+    string $line = "{$app->name} {$info->name} [options]";
+
+    if (!$info->positionals->metavar->empty()) {
+        $line->append(" {$info->positionals->metavar}");
+    }
+
+    return $line;
+}
+
+function writePositionalBlock(
+    string& $out,
+    const Positionals& $pos,
+    const TerminalCapabilities& $caps
+) : void
+{
+    if ($pos->metavar->empty()) {
+        return;
+    }
+
+    if (!$pos->category->empty()) {
+        return;
+    }
+
+    $out->append(std::io::NEWLINE);
+    $out->append('  ');
+    $out->append(styled($pos->metavar, SGR_INFO, $caps->color));
+    $out->append(std::io::NEWLINE);
+    writeWrapped($out, $pos->description, 4, $caps);
+}
+
+function writeCategories(
+    string& $out,
+    const Command& $app,
+    const Parsed& $p,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    array<string> $seen = array<string>();
+    string $posCat = pagePositionals($app, $p)->category;
+    usize $i = 0;
+
+    while ($i < $app->options->count()) {
+        string $heading = $app->options[$i]->category;
+        $i = $i + 1;
+
+        if (containsString($seen, $heading)) {
+            continue;
+        }
+
+        $seen[] = $heading;
+        writeCategory($out, $app, $p, $heading, $column, $caps);
+    }
+
+    if (!$posCat->empty() && !containsString($seen, $posCat)) {
+        writeCategory($out, $app, $p, $posCat, $column, $caps);
+    }
+}
+
+function writeCategory(
+    string& $out,
+    const Command& $app,
+    const Parsed& $p,
+    const string& $heading,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    int32 $bit = $p->selectedBit();
+
+    Positionals $pos = pagePositionals($app, $p);
+    string $posCat = $pos->category;
+    string $posMeta = $pos->metavar;
+    string $posSum = $pos->summary;
+    bool $drawn = false;
+
+    if (!$posMeta->empty() && !$posCat->empty() && $heading == $posCat) {
+        $out->append(std::io::NEWLINE);
+        writeHeading($out, $heading, $caps);
+        string $drawnPos = styled($posMeta, SGR_INFO, $caps->color);
+        writeRow(
+            $out,
+            "  {$drawnPos}",
+            2 + textWidth($posMeta),
+            $posSum,
+            '',
+            $column,
+            $caps
+        );
+        $drawn = true;
+    }
+
+    usize $i = 0;
+
+    while ($i < $app->options->count()) {
+        Option $option = $app->options[$i];
+        $i = $i + 1;
+
+        if ($option->category != $heading || !$option->accepted($bit)) {
+            continue;
+        }
+
+        if (!$drawn) {
+            $out->append(std::io::NEWLINE);
+            writeHeading($out, $heading, $caps);
+            $drawn = true;
+        }
+
+        writeOption($out, $option, $bit, $column, $caps);
+    }
+}
+
+function pagePositionals(const Command& $app, const Parsed& $p) : Positionals
+{
+    if ($p->hasCommand) {
+        return $app->commands[$p->command->id]->positionals;
+    }
+
+    return $app->positionals;
+}
+
+function writeOption(
+    string& $out,
+    const Option& $option,
+    int32 $bit,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    string $spelling = $option->spelling();
+    string $drawn = styled($spelling, SGR_INFO, $caps->color);
+    writeRow(
+        $out,
+        "  {$drawn}",
+        2 + textWidth($spelling),
+        $option->summary,
+        '',
+        $column,
+        $caps
+    );
+
+    usize $i = 0;
+    usize $n = $option->values->count();
+
+    while ($i < $n) {
+        bool $last = $i + 1 == $n;
+        string $marker = '';
+
+        if ($option->values[$i]->name == $option->fallback) {
+            $marker = 'default';
+        }
+
+        if (!$option->values[$i]->accepted($option, $bit) && $bit != 0) {
+            $marker = 'not on this command';
+        }
+
+        string $name = styled($option->values[$i]->name, SGR_SECONDARY, $caps->color);
+        writeTreeBranch(
+            $out,
+            '    ',
+            $last,
+            $name,
+            $option->values[$i]->summary,
+            $marker,
+            $column,
+            $caps
+        );
+        $i = $i + 1;
+    }
+}
+
+function summaryColumn(
+    const Command& $app,
+    const Parsed& $p,
+    const TerminalCapabilities& $caps
+) : int32
+{
+    int32 $bit = $p->selectedBit();
+
+    int32 $widest = 0;
+
+    if (!$p->hasCommand) {
+        usize $i = 0;
+
+        while ($i < $app->commands->count()) {
+            int32 $w = 2 + textWidth($app->commands[$i]->name);
+
+            if ($w > $widest) {
+                $widest = $w;
+            }
+
+            $i = $i + 1;
+        }
+    }
+
+    string $pos = pagePositionals($app, $p)->metavar;
+
+    if (!$pos->empty()) {
+        int32 $w = 2 + textWidth($pos);
+
+        if ($w > $widest) {
+            $widest = $w;
+        }
+    }
+
+    usize $i = 0;
+
+    while ($i < $app->options->count()) {
+        if (!$app->options[$i]->accepted($bit)) {
+            $i = $i + 1;
+            continue;
+        }
+
+        int32 $w = 2 + textWidth($app->options[$i]->spelling());
+
+        if ($w > $widest) {
+            $widest = $w;
+        }
+
+        usize $v = 0;
+
+        while ($v < $app->options[$i]->values->count()) {
+            int32 $vw = 4 + 3 + textWidth($app->options[$i]->values[$v]->name);
+
+            if ($vw > $widest) {
+                $widest = $vw;
+            }
+
+            $v = $v + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    int32 $column = $widest + 2;
+
+    if ($column > 30) {
+        $column = 30;
+    }
+
+    int32 $half = pageWidth($caps) / 2;
+
+    if ($column > $half) {
+        return $half;
+    }
+
+    return $column;
+}
+
+function acceptedCommands(const Command& $app, const Option& $option) : string
+{
+    string $joined = '';
+    usize $i = 0;
+
+    while ($i < $app->commands->count()) {
+        if (($option->commands & $app->commands[$i]->bit) == 0) {
+            $i = $i + 1;
+            continue;
+        }
+
+        if (!$joined->empty()) {
+            $joined->append(', ');
+        }
+
+        $joined->append($app->commands[$i]->name);
+        $i = $i + 1;
+    }
+
+    return $joined;
+}
+
+function containsString(const array<string>& $items, const string& $needle) : bool
+{
+    usize $i = 0;
+
+    while ($i < $items->count()) {
+        if ($items[$i] == $needle) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}

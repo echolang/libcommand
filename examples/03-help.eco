@@ -1,0 +1,52 @@
+// help is generated from the table. the four-branch driver draws the page, the
+// version line, a refusal, or one option in full.
+//
+//   echoc run -m . examples/03-help.eco -- --help
+//   echoc run -m . examples/03-help.eco -- --version
+//   echoc run -m . examples/03-help.eco -- build --help optimize
+
+use command;
+use std::env;
+use std::io;
+
+command::Command $app = command::Command('greet', '0.1.0', 'say hello');
+command::Subcommand $build = $app->command('build', 'compile a native executable', 'Compile your program and write a binary.');
+
+command::Arg $out = $app->arg('output', 'o', '<file>', 'where the executable is written');
+$app->require($out, $build);
+$app->describe($out, "The path of the binary.\n  greet build -o app src/*.eco");
+
+command::Arg $opt = $app->arg('optimize', '', '<mode>', 'how hard, and over how much at once');
+$app->accept($opt, $build);
+$app->fallback($opt, 'module');
+$modes = array<command::OptionValue>();
+$modes[] = command::OptionValue('none', 'skip the pipeline', 'Emit IR as codegen wrote it.');
+$modes[] = command::OptionValue('module', 'each unit on its own', 'The default, and the only mode the cache can help with.');
+$modes[] = command::OptionValue('whole', 'merge every unit, then optimize', 'Inlining across modules. Bypasses the cache.');
+$app->values($opt, $modes);
+$app->describe($opt, 'How hard the optimizer works, and how much of your program it may look at once.');
+
+$r = $app->parse(env::argv());
+
+if ($r->error != null) {
+    command::Error $e = $r->error ?? .noCommand;
+    command::CLIContext $err = .from($r->parsed, $app, .stderr);
+    $err->write(command::renderError($e, $app, $r->parsed, $err));
+    env::exit(1);
+}
+
+$parsed = $r->parsed;
+
+if ($parsed->wantsVersion) {
+    io::print(command::renderVersion($app));
+    env::exit(0);
+}
+
+if ($parsed->wantsHelp) {
+    command::CLIContext $help = .from($parsed, $app, .stdout);
+    $help->write(command::renderHelp($app, $parsed, $help));
+    env::exit(0);
+}
+
+echo "output: {$parsed->value($out)}";
+echo "optimize: {$parsed->value($opt)}";

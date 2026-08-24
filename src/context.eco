@@ -1,0 +1,205 @@
+/**
+ * The terminal a program is talking to: what it can do, and where it writes.
+ *
+ * A context is that pair named once, the factory that mints widgets already
+ * wired to it, and the writer those widgets share.
+ *
+ *   CLIContext $ctx = .resolve(.auto, .stderr);
+ *   element::Text $name = $ctx->create<element::Text>('What is your name?');
+ *
+ * `create<T>` is a constructor call on T, with this context as the first
+ * argument. Echo has no variadics, so arity is overloads. It is not a
+ * registry: two creates are two objects.
+ *
+ * Widgets look up the live channel when they draw. Opening a run after minting
+ * a widget, or closing one before asking, is what the widget will render.
+ *
+ *   $ctx->beginStepper('create-app');
+ *   ...
+ *   $ctx->endStepper('Done');
+ *
+ * Dropping a context still open closes the run. Call `endStepper` yourself
+ * when the closing row should say something.
+ */
+
+namespace command;
+
+public class CLIContext
+{
+    public TerminalCapabilities $caps;
+    public std::io::stream $out;
+
+    /**
+     * False means the widgets this context mints capture instead of writing.
+     * Tests reach for `buffer` / `plain` so they never touch the host tty.
+     */
+    public bool $toStream;
+    public string $captured;
+
+    command::element::Run? $run;
+
+    constructor(std::io::stream $out, TerminalCapabilities $caps)
+    {
+        $this->caps = $caps;
+        $this->out = $out;
+        $this->toStream = true;
+        $this->captured = '';
+        $this->run = null;
+    }
+
+    destructor()
+    {
+        $this->endStepper();
+    }
+
+    public static function resolve(ColorChoice $color, TerminalStream $stream) : CLIContext
+    {
+        return CLIContext(streamOf($stream), command::resolve($color, $stream));
+    }
+
+    /**
+     * Honour `--color` the parse already took. Help on stdout and widgets on
+     * stderr are two calls.
+     */
+    public static function from(
+        const Parsed& $p,
+        const Command& $app,
+        TerminalStream $stream
+    ) : CLIContext
+    {
+        return CLIContext(streamOf($stream), capabilitiesFor($p, $app, $stream));
+    }
+
+    public static function buffer(TerminalCapabilities $caps) : CLIContext
+    {
+        CLIContext $ctx = CLIContext(std::io::stderr, $caps);
+        $ctx->toStream = false;
+
+        return $ctx;
+    }
+
+    public static function plain() : CLIContext
+    {
+        return .buffer(command::plain());
+    }
+
+    public function create<T : class>() : T
+    {
+        return T($this);
+    }
+
+    public function create<T : class, A>(A $a) : T
+    {
+        return T($this, $a);
+    }
+
+    public function create<T : class, A, B>(A $a, B $b) : T
+    {
+        return T($this, $a, $b);
+    }
+
+    public function beginStepper(const string& $title) : void
+    {
+        if ($this->run != null) {
+            die('command::CLIContext: stepper already open');
+        }
+
+        command::element::Run $run = command::element::Run($this);
+        $this->run = $run;
+        string $open = $run->stepper->open($title);
+        $open->append(std::io::NEWLINE);
+        $this->write($open);
+        $run->open = true;
+    }
+
+    public function endStepper() : void
+    {
+        $this->endStepper('');
+    }
+
+    public function endStepper(string $message) : void
+    {
+        command::element::Run? $cur = $this->run;
+
+        if ($cur == null) {
+            return;
+        }
+
+        command::element::Run $run = guard $cur else {
+            return;
+        }
+
+        $this->run = null;
+
+        if (!$run->open) {
+            return;
+        }
+
+        $run->open = false;
+        string $end = $run->stepper->close($message);
+        $end->append(std::io::NEWLINE);
+        $this->write($end);
+    }
+
+    public const function channel() : command::element::Stepper
+    {
+        command::element::Run? $cur = $this->run;
+        command::element::Run $run = guard $cur else {
+            return command::element::Stepper(false, $this->caps);
+        }
+
+        return $run->stepper;
+    }
+
+    public function gap() : void
+    {
+        string $bar = $this->channel()->spacer();
+
+        if ($bar->empty()) {
+            return;
+        }
+
+        string $row = $bar;
+        $row->append(std::io::NEWLINE);
+        $this->write($row);
+    }
+
+    public function write(const string& $bytes) : void
+    {
+        if (!$this->toStream) {
+            $this->captured->append($bytes);
+            return;
+        }
+
+        $this->out->write($bytes);
+    }
+
+    public function println(const string& $s) : void
+    {
+        $this->write($s);
+        $this->write(std::io::NEWLINE);
+    }
+
+    public function printError(const string& $s) : void
+    {
+        if ($this->run != null) {
+            command::SpinnerTheme $t = spinnerTheme($this->caps->unicode);
+            $this->gap();
+            $this->println($this->channel()->leadRow($t->outcome(false), outcomeSgr(false), $s));
+            return;
+        }
+
+        string $badge = styled('error', SGR_ERROR, $this->caps->color);
+        $this->write("{$badge}: {$s}");
+        $this->write(std::io::NEWLINE);
+    }
+}
+
+function streamOf(TerminalStream $stream) : std::io::stream
+{
+    if ($stream == TerminalStream::stdout) {
+        return std::io::stdout;
+    }
+
+    return std::io::stderr;
+}

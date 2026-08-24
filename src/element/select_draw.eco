@@ -1,0 +1,188 @@
+/**
+ * What a Select hands to a Stepper: a title, the visible rows, the answer.
+ *
+ * Nothing here indents, truncates, or draws a bar. Rows come back plain and
+ * the Stepper decides how far left they start.
+ */
+
+namespace command::element;
+
+function selectRows(const Select& $q, const StepContext& $ctx) : array<string>
+{
+    array<string> $rows = array<string>();
+
+    int32 $n = command::i32Of($q->items->count());
+    int32 $from = $q->pageOff;
+    int32 $to = $from + $q->visible();
+
+    if ($to > $n) {
+        $to = $n;
+    }
+
+    int32 $i = $from;
+
+    // the blank standing in for the pointer is the same on every unfocused
+    // row, so measure and build it once rather than once per row
+    string $blank = command::spaces(command::textWidth($ctx->pointer));
+
+    while ($i < $to) {
+        $rows[] = drawRow($q, $ctx, $i, $blank);
+        $i = $i + 1;
+    }
+
+    $rows[] = navFooter($q, $ctx);
+
+    return $rows;
+}
+
+/**
+ * The keys this list answers to, under the list. Only the key names are
+ * dimmed - the eye is meant to catch `Space:` and `Enter:` and skip the
+ * prose, which is the opposite of dimming the whole row.
+ *
+ * Paging needs no line of its own: `to navigate` is already the answer to
+ * "there are more of these than I can see".
+ */
+function navFooter(const Select& $q, const StepContext& $ctx) : string
+{
+    bool $color = $ctx->caps->color;
+    string $row = command::styled($ctx->theme->nav, command::SGR_DIM, $color);
+    $row->append(" to navigate {$ctx->theme->dot} ");
+
+    if ($q->kind == SelectKind::checks) {
+        $row->append(command::styled('Space:', command::SGR_DIM, $color));
+        $row->append(" select {$ctx->theme->dot} ");
+    }
+
+    $row->append(command::styled('Enter:', command::SGR_DIM, $color));
+    $row->append(' confirm');
+
+    return $row;
+}
+
+function drawRow(
+    const Select& $q,
+    const StepContext& $ctx,
+    int32 $i,
+    const string& $blank
+) : string
+{
+    bool $focus = $i == $q->cursor;
+    string $pad = $ctx->pointer;
+
+    if (!$focus) {
+        $pad = $blank;
+    }
+
+    string $glyph = drawGlyph($q, $ctx->theme, $i);
+    usize $u = command::usizeOf($i);
+    string $label = $q->items[$u];
+    string $row = "{$pad}{$glyph}{$label}";
+
+    // a run dims everything the cursor is not on, so the eye lands on one row
+    // in a long column. on its own the pointer already does that job, and the
+    // focused row is the one that gets the colour
+    if ($ctx->muted) {
+        string $mark = markerSgr($q, $i, $focus);
+
+        if ($mark->empty()) {
+            return command::styled($row, command::SGR_DIM, $ctx->caps->color);
+        }
+
+        // the marker carries the colour and the label does not: a lit label
+        // competes with the answer, and a lit marker is the answer. the label
+        // still dims off the cursor, so a ticked row reads as chosen without
+        // reading as focused
+        string $lit = command::styled($glyph, $mark, $ctx->caps->color);
+        string $text = $label;
+
+        if (!$focus) {
+            $text = command::styled($label, command::SGR_DIM, $ctx->caps->color);
+        }
+
+        return "{$pad}{$lit}{$text}";
+    }
+
+    if ($focus) {
+        return command::styled($row, command::SGR_INFO, $ctx->caps->color);
+    }
+
+    return $row;
+}
+
+/**
+ * The colour of a row's marker, or `''` for a row whose marker says nothing
+ * and can be dimmed away whole.
+ *
+ * Green means chosen. A ticked box keeps it wherever the cursor has gone,
+ * because what you have already picked has to be readable off the column
+ * rather than one row at a time. The cursor resting on an empty box is the
+ * channel's own colour: a place, not an answer.
+ */
+function markerSgr(const Select& $q, int32 $i, bool $focus) : string
+{
+    usize $u = command::usizeOf($i);
+
+    if ($q->kind == SelectKind::checks && $u < $q->marked->count() && $q->marked[$u]) {
+        return command::SGR_SUCCESS;
+    }
+
+    if (!$focus) {
+        return '';
+    }
+
+    // a radio's filled marker is only ever drawn under the cursor
+    if ($q->kind == SelectKind::radio) {
+        return command::SGR_SUCCESS;
+    }
+
+    return command::SGR_SECONDARY;
+}
+
+function drawGlyph(const Select& $q, const command::PromptTheme& $theme, int32 $i) : string
+{
+    usize $u = command::usizeOf($i);
+
+    if ($q->kind == SelectKind::radio) {
+        if ($i == $q->cursor) {
+            return $theme->radioOn;
+        }
+
+        return $theme->radioOff;
+    }
+
+    if ($u < $q->marked->count() && $q->marked[$u]) {
+        return $theme->checkOn;
+    }
+
+    return $theme->checkOff;
+}
+
+function drawNumbered(const Select& $q) : string
+{
+    array<string> $rows = array<string>();
+    usize $i = 0;
+
+    while ($i < $q->items->count()) {
+        int32 $n = command::i32Of($i) + 1;
+        $rows[] = "{$n}) {$q->items[$i]}";
+        $i = $i + 1;
+    }
+
+    return frameRowsOf($q->channel(), $q->title, $rows, .active);
+}
+
+function summaryRows(const array<string>& $picked) : array<string>
+{
+    array<string> $rows = array<string>();
+
+    if ($picked->empty()) {
+        $rows[] = '(none)';
+
+        return $rows;
+    }
+
+    $rows[] = str::join($picked, ', ');
+
+    return $rows;
+}

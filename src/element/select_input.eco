@@ -1,0 +1,289 @@
+/**
+ * Key handling and numbered-line answers for Select.
+ */
+
+namespace command::element;
+
+/**
+ * One key against the cursor. Every arm moves the cursor and nothing else -
+ * the window that follows it is re-established once, on the way out, so a new
+ * arm cannot forget to.
+ */
+function applyKey(Select $q, Key $key) : void
+{
+    int32 $n = command::i32Of($q->items->count());
+
+    if ($n <= 0) {
+        return;
+    }
+
+    if ($key == Key::space) {
+        if ($q->kind == SelectKind::checks) {
+            usize $i = command::usizeOf($q->cursor);
+            $q->marked[$i] = !$q->marked[$i];
+        }
+
+        return;
+    }
+
+    if ($key == Key::up) {
+        if ($q->cursor > 0) {
+            $q->cursor = $q->cursor - 1;
+        }
+        else if ($q->wrapAround) {
+            $q->cursor = $n - 1;
+        }
+    }
+    else if ($key == Key::down) {
+        if ($q->cursor + 1 < $n) {
+            $q->cursor = $q->cursor + 1;
+        }
+        else if ($q->wrapAround) {
+            $q->cursor = 0;
+        }
+    }
+    else if ($key == Key::home) {
+        $q->cursor = 0;
+    }
+    else if ($key == Key::end) {
+        $q->cursor = $n - 1;
+    }
+    else if ($key == Key::pageUp) {
+        $q->cursor = $q->cursor - $q->visible();
+    }
+    else if ($key == Key::pageDown) {
+        $q->cursor = $q->cursor + $q->visible();
+    }
+    else {
+        return;
+    }
+
+    // paging can land outside the list; `ensureWindow` clamps the cursor into
+    // range before it decides which page holds it
+    $q->ensureWindow();
+}
+
+function canConfirm(const Select& $q) : bool
+{
+    return $q->kind == SelectKind::radio || anyMarked($q) || !$q->must;
+}
+
+function anyMarked(const Select& $q) : bool
+{
+    usize $i = 0;
+
+    while ($i < $q->marked->count()) {
+        if ($q->marked[$i]) {
+            return true;
+        }
+
+        $i = $i + 1;
+    }
+
+    return false;
+}
+
+function collectPicks(const Select& $q) : array<string>
+{
+    array<string> $out = array<string>();
+
+    if ($q->kind == SelectKind::radio) {
+        usize $i = command::usizeOf($q->cursor);
+
+        if ($i < $q->items->count()) {
+            $out[] = $q->items[$i];
+        }
+
+        return $out;
+    }
+
+    usize $j = 0;
+
+    while ($j < $q->items->count()) {
+        if ($q->marked[$j]) {
+            $out[] = $q->items[$j];
+        }
+
+        $j = $j + 1;
+    }
+
+    return $out;
+}
+
+function syncMarks(Select $q, const array<string>& $picked) : void
+{
+    usize $i = 0;
+
+    while ($i < $q->marked->count()) {
+        $q->marked[$i] = false;
+        $i = $i + 1;
+    }
+
+    usize $p = 0;
+
+    while ($p < $picked->count()) {
+        int32 $at = indexOf($q, $picked[$p]);
+
+        if ($at >= 0) {
+            usize $u = command::usizeOf($at);
+            $q->marked[$u] = true;
+
+            if ($p == 0) {
+                $q->cursor = $at;
+            }
+        }
+
+        $p = $p + 1;
+    }
+
+    $q->ensureWindow();
+}
+
+function indexOf(const Select& $q, const string& $label) : int32
+{
+    usize $i = 0;
+
+    while ($i < $q->items->count()) {
+        if ($q->items[$i] == $label) {
+            return command::i32Of($i);
+        }
+
+        $i = $i + 1;
+    }
+
+    return -1;
+}
+
+function parseLine(const Select& $q, const string& $line) : array<string>?
+{
+    if (lineBlank($line)) {
+        if ($q->didPick) {
+            return collectPicks($q);
+        }
+
+        if ($q->kind == SelectKind::checks && !$q->must) {
+            return array<string>();
+        }
+
+        return null;
+    }
+
+    array<int32>? $ids = parseNaturals($line);
+
+    if ($ids == null) {
+        return null;
+    }
+
+    array<int32> $nums = $ids ?? array<int32>();
+    int32 $n = command::i32Of($q->items->count());
+
+    if ($q->kind == SelectKind::radio) {
+        if ($nums->count() != 1) {
+            return null;
+        }
+
+        int32 $id = $nums[0];
+
+        if ($id < 1 || $id > $n) {
+            return null;
+        }
+
+        array<string> $one = array<string>();
+        $one[] = $q->items[command::usizeOf($id - 1)];
+
+        return $one;
+    }
+
+    array<bool> $hit = array<bool>();
+    usize $k = 0;
+
+    while ($k < $q->items->count()) {
+        $hit[] = false;
+        $k = $k + 1;
+    }
+
+    usize $j = 0;
+
+    while ($j < $nums->count()) {
+        int32 $id = $nums[$j];
+
+        if ($id < 1 || $id > $n) {
+            return null;
+        }
+
+        $hit[command::usizeOf($id - 1)] = true;
+        $j = $j + 1;
+    }
+
+    array<string> $out = array<string>();
+    usize $i = 0;
+
+    while ($i < $q->items->count()) {
+        if ($hit[$i]) {
+            $out[] = $q->items[$i];
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($out->empty() && $q->must) {
+        return null;
+    }
+
+    return $out;
+}
+
+function parseNaturals(const string& $line) : array<int32>?
+{
+    array<int32> $out = array<int32>();
+    int32 $n = 0;
+    bool $in = false;
+    usize $i = 0;
+
+    while ($i < $line->size()) {
+        int32 $w = $line->byte($i);
+
+        if ($w >= command::CH_ZERO && $w <= command::CH_NINE) {
+            if (!$in) {
+                $n = 0;
+                $in = true;
+            }
+
+            $n = $n * 10 + ($w - command::CH_ZERO);
+        }
+        else if ($w == command::CH_SPACE || $w == command::CH_COMMA || $w == command::CH_TAB) {
+            if ($in) {
+                $out[] = $n;
+                $in = false;
+            }
+        }
+        else {
+            return null;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($in) {
+        $out[] = $n;
+    }
+
+    return $out;
+}
+
+function lineBlank(const string& $line) : bool
+{
+    usize $i = 0;
+
+    while ($i < $line->size()) {
+        int32 $w = $line->byte($i);
+
+        if ($w != command::CH_SPACE && $w != command::CH_TAB && $w != command::CH_CR) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
+}

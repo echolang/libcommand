@@ -1,0 +1,41 @@
+/**
+ * LiveLine: CR+EL, non-interactive is commit-only.
+ */
+
+use command::element;
+
+test live_noninteractive_paint_is_silent
+{
+    element::LiveLine $line = element::LiveLine(command::CLIContext::plain());
+    $line->paint('secret');
+    $line->erase();
+
+    assert($line->ctx->captured == '', 'no rewrite in a log');
+}
+
+test live_noninteractive_commit_is_a_line
+{
+    element::LiveLine $line = element::LiveLine(command::CLIContext::plain());
+    $line->commit('done');
+
+    assert($line->ctx->captured == "done\n", 'full line');
+}
+
+test live_interactive_paint_rewrites
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveLine $line = element::LiveLine(command::CLIContext::buffer($caps));
+    $line->paint('hello');
+
+    assert($line->ctx->captured->starts("\r\x1b[K"), 'CR EL');
+    assert($line->ctx->captured->contains('hello'), 'text');
+}
+
+test live_interactive_commit_ends_a_line
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LiveLine $line = element::LiveLine(command::CLIContext::buffer($caps));
+    $line->commit('done');
+
+    assert($line->ctx->captured->ends("done\n"), 'newline');
+}

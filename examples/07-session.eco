@@ -1,0 +1,41 @@
+// a connected run: intro, prompts on the same context, a note, live widgets in the bar.
+//
+//   echoc run -m . examples/07-session.eco
+//   printf 'my-app\n1\n' | echoc run -m . examples/07-session.eco
+
+use command;
+use command::element;
+use std::thread;
+
+command::CLIContext $ctx = .resolve(.auto, .stderr);
+
+$ctx->beginStepper('create-app');
+
+$where = $ctx->create<element::Text>('Where should we create it?');
+$where->hint('./my-app');
+$where->otherwise('./my-app');
+$dir = $where->ask();
+
+$types = ['TypeScript', 'JavaScript', 'CoffeeScript'];
+$type = element::select($ctx, 'Pick a project type', $types);
+
+$ctx->gap();
+$ctx->println(element::noteFrame($ctx->channel(), 'Heads up', "This writes into {$dir}\nand does not ask again."));
+
+// printError during a run is a mark on the channel, not an error: badge
+$ctx->printError('the directory already exists, overwriting');
+
+$spin = $ctx->create<element::Spinner>();
+$spin->start('writing files');
+thread::sleep(400);
+$spin->succeed("wrote {$dir}");
+
+$p = $ctx->create<element::Progress>();
+$p->start('index', 3);
+thread::sleep(120);
+$p->advance(1, 'a.eco');
+thread::sleep(120);
+$p->advance(2, 'c.eco');
+$p->finish();
+
+$ctx->endStepper("created {$type[0]} in {$dir}");

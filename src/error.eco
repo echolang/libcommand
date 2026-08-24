@@ -1,0 +1,51 @@
+/**
+ * Why argv was refused.
+ *
+ * An enum, so `match` is the call site. Named cases are the ways this
+ * parser refuses input. There is no leftover: the set is closed, and we
+ * construct the case ourselves.
+ *
+ * The sentence comes from the case (`message()`, and `"{$e}"` via `str::from`).
+ */
+
+namespace command;
+
+public enum Error
+{
+    case unknownCommand(string $word, string $list);
+    case noCommand;
+    case unknownOption(string $spelling);
+    case shortNotSingle(string $word);
+    case needsValue(string $spelling);
+    case valueLooksLikeFlag(string $names, string $next);
+    case unexpectedValue(string $name);
+    case unknownValue(string $name, string $word, string $expected);
+    case notOnCommand(string $who, string $names);
+    case missingRequired(string $who, string $names);
+    case exclusion(string $a, string $b);
+    case tooFewPositionals(string $who, string $metavar);
+    case unexpectedPositionals(string $who);
+    case tooManyPositionals(string $who);
+    case unexpectedSeparator(string $who);
+
+    public const function message() : string
+    {
+        return match ($this) {
+            .unknownCommand($word, $list) => "'{$word}' is not a command. Write {$list}.",
+            .noCommand => 'No command given.',
+            .unknownOption($spelling) => "Unknown option '{$spelling}'.",
+            .shortNotSingle($word) => "'{$word}' is not an option. A short option is one character, and a long one takes two dashes.",
+            .needsValue($spelling) => "'{$spelling}' needs a value.",
+            .valueLooksLikeFlag($names, $next) => "'{$names}' needs a value, and '{$next}' is an option.",
+            .unexpectedValue($name) => "'--{$name}' takes no value.",
+            .unknownValue($name, $word, $expected) => "Unknown '--{$name}' value '{$word}'. Expected one of: {$expected}.",
+            .notOnCommand($who, $names) => "'{$who}' does not take '{$names}'.",
+            .missingRequired($who, $names) => "'{$who}' needs '{$names}'.",
+            .exclusion($a, $b) => "'{$a}' and '{$b}' are two answers to one question. Write one.",
+            .tooFewPositionals($who, $metavar) => "'{$who}' needs '{$metavar}'.",
+            .unexpectedPositionals($who) => "'{$who}' takes no positional arguments.",
+            .tooManyPositionals($who) => "'{$who}' takes too many positional arguments.",
+            .unexpectedSeparator($who) => "'{$who}' does not take '--'.",
+        };
+    }
+}

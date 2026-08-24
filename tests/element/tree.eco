@@ -1,0 +1,57 @@
+/**
+ * Tree connectors.
+ */
+
+use command::element;
+
+test tree_ascii_nested
+{
+    element::Tree $t = command::CLIContext::plain()->create<element::Tree>('libcommand');
+    element::Node $cli = element::Node('cli');
+    $cli->children[] = element::Node('parse');
+    $cli->children[] = element::Node('help');
+    $t->root->children[] = $cli;
+    $t->root->children[] = element::Node('widgets');
+
+    string $page = $t->render();
+
+    assert($page->contains('libcommand'), 'root');
+    assert($page->contains('|- cli'), 'mid');
+    assert($page->contains('`- widgets'), 'last');
+    assert($page->contains('| |- parse'), 'nested');
+    assert($page->contains('| `- help'), 'nested last');
+}
+
+test tree_unicode_connectors
+{
+    command::CLIContext $ctx = .buffer(
+        command::TerminalCapabilities(false, true, 80, true)
+    );
+    element::Tree $t = $ctx->create<element::Tree>('root');
+    $t->root->children[] = element::Node('a');
+    $t->root->children[] = element::Node('b');
+
+    string $page = $t->render();
+
+    assert($page->contains('├─ a'), 'mid');
+    assert($page->contains('└─ b'), 'last');
+}
+
+test tree_display_captures
+{
+    command::CLIContext $ctx = .plain();
+    element::Tree $t = $ctx->create<element::Tree>('libcommand');
+    $t->root->children[] = element::Node('cli');
+    $t->display();
+
+    string $page = $t->render();
+    assert($t->captured == $page, 'captured matches render');
+    assert($t->captured->contains('libcommand'), 'root');
+    assert($t->captured->contains('`- cli'), 'child');
+    assert($ctx->captured->empty(), 'buffer capture is on the widget');
+
+    $t->display();
+    string $twice = $page;
+    $twice->append($page);
+    assert($t->captured == $twice, 'second display appends');
+}

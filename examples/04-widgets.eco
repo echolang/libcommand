@@ -1,0 +1,31 @@
+// static widgets: a Table and a Tree, drawn with display().
+//
+//   echoc run -m . examples/04-widgets.eco
+
+use command;
+use command::element;
+
+command::CLIContext $ctx = .resolve(.auto, .stderr);
+
+$t = $ctx->create<element::Table>();
+$t->column('Feature');
+$t->column('Status');
+$t->showHeader = true;
+$t->border = true;
+$t->row(['Help', 'ready']);
+$t->row(['Tables', 'ready']);
+$t->display();
+$ctx->println('');
+
+$tree = $ctx->create<element::Tree>('libcommand');
+$cli = element::Node('cli');
+$cli->children[] = element::Node('parse');
+$cli->children[] = element::Node('help');
+$tree->root->children[] = $cli;
+$el = element::Node('element');
+$el->children[] = element::Node('table');
+$el->children[] = element::Node('tree');
+$tree->root->children[] = $el;
+$tree->display();
+
+// render() is the string-composition hatch; display() is how it leaves

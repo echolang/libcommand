@@ -1,0 +1,13 @@
+/**
+ * `str::from` so `"{$e}"` works.
+ *
+ * A file of its own because a namespace is a property of the file:
+ * error.eco is `namespace command;` and cannot also be `namespace str;`.
+ */
+
+namespace str;
+
+public function from(const command::Error& $e) : string
+{
+    return $e->message();
+}

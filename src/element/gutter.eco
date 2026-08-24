@@ -1,0 +1,118 @@
+/**
+ * A run of prompts drawn as one connected thing. The open run lives on
+ * CLIContext (`beginStepper` / `endStepper`); this file is that state
+ * and the note box that hangs off the channel.
+ *
+ *   $ctx->beginStepper('create-app');
+ *   string $dir = element::text($ctx, 'Where should we create it?');
+ *   $ctx->endStepper('Done');
+ *
+ * Elements never name Run. They ask the context for a Stepper, and a live
+ * run is how that Stepper gets a bar.
+ */
+
+namespace command::element;
+
+class Run
+{
+    public Stepper $stepper;
+    public bool $open;
+
+    constructor(command::CLIContext $ctx)
+    {
+        $this->stepper = Stepper(true, $ctx->caps);
+        $this->open = false;
+    }
+}
+
+/**
+ * A boxed aside:
+ *
+ *   ◇  Heads up ─────────────╮
+ *   │                        │
+ *   │  This overwrites ./app │
+ *   │                        │
+ *   ├────────────────────────╯
+ *
+ * Off-run there is no left edge to hang a box from, so it degrades to the
+ * title and an indented body - which is the honest drawing of the same thing.
+ */
+public function noteFrame(const Stepper& $s, const string& $title, const string& $body) : string
+{
+    array<string> $lines = str::split($body, "\n")->owned();
+
+    if (!$s->gutter) {
+        string $flat = $s->leadRow($s->theme->stepDone, command::SGR_MUTED, $title);
+        usize $j = 0;
+
+        while ($j < $lines->count()) {
+            $flat->append(std::io::NEWLINE);
+            $flat->append($s->row($lines[$j]));
+            $j = $j + 1;
+        }
+
+        return $flat;
+    }
+
+    command::PromptTheme $theme = $s->theme;
+    bool $color = $s->caps->color;
+    int32 $inner = noteInner($s, $title, $lines);
+    string $edge = command::styled($theme->bar, command::SGR_MUTED, $color);
+    string $blank = command::spaces($inner);
+    string $hollow = "{$blank}{$edge}";
+
+    string $rule = command::repeatCell($theme->barH, $inner - command::textWidth($title) - 1);
+    string $head = "{$title} {$rule}{$theme->cornerTr}";
+    string $out = $s->leadRow($theme->stepDone, command::SGR_MUTED, $head);
+
+    $out->append(std::io::NEWLINE);
+    $out->append($s->row($hollow));
+
+    usize $i = 0;
+
+    while ($i < $lines->count()) {
+        string $pad = command::spaces($inner - command::textWidth($lines[$i]));
+        string $line = "{$lines[$i]}{$pad}{$edge}";
+        $out->append(std::io::NEWLINE);
+        $out->append($s->row($line));
+        $i = $i + 1;
+    }
+
+    // the foot is the one row that runs through the channel instead of
+    // starting after it - the rule has to reach the corner it closes, and two
+    // spaces of separation would leave the box hanging open on the left
+    string $rest = command::repeatCell($theme->barH, $inner + 2);
+    string $foot = command::styled($theme->connectLeft, command::SGR_MUTED, $color);
+    $foot->append("{$rest}{$theme->cornerBr}");
+
+    $out->append(std::io::NEWLINE);
+    $out->append($s->row($hollow));
+    $out->append(std::io::NEWLINE);
+    $out->append($foot);
+
+    return $out;
+}
+
+function noteInner(const Stepper& $s, const string& $title, const array<string>& $lines) : int32
+{
+    int32 $inner = command::textWidth($title) + 2;
+    usize $i = 0;
+
+    while ($i < $lines->count()) {
+        int32 $w = command::textWidth($lines[$i]) + 2;
+
+        if ($w > $inner) {
+            $inner = $w;
+        }
+
+        $i = $i + 1;
+    }
+
+    int32 $room = $s->room() - 1;
+
+    if ($inner > $room) {
+        $inner = $room;
+    }
+
+    return $inner;
+}
