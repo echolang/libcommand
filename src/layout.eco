@@ -202,7 +202,7 @@ public function repeatCell(const string& $cell, int32 $n) : string
 }
 
 public function writeHeading(
-    string& $out,
+    Block& $out,
     const string& $text,
     const TerminalCapabilities& $caps
 ) : void
@@ -228,12 +228,11 @@ public function writeHeading(
         $line->append(styled($rule, SGR_DIM, $caps->color));
     }
 
-    $out->append($line);
-    $out->append(std::io::NEWLINE);
+    $out->push($line);
 }
 
 public function writeRow(
-    string& $out,
+    Block& $out,
     const string& $spelling,
     int32 $spellingWidth,
     const string& $summary,
@@ -247,8 +246,7 @@ public function writeRow(
     string $line = $spelling;
 
     if ($visible + 1 > $column) {
-        $out->append($line);
-        $out->append(std::io::NEWLINE);
+        $out->push($line);
         $line = '';
         $visible = 0;
     }
@@ -298,8 +296,7 @@ public function writeRow(
             $line->append(styled($marked, SGR_DIM, $caps->color));
         }
 
-        $out->append($line);
-        $out->append(std::io::NEWLINE);
+        $out->push($line);
 
         if ($take >= $rest->size()) {
             break;
@@ -319,30 +316,32 @@ public function writeRow(
 }
 
 public function writeWrapped(
-    string& $out,
+    Block& $out,
     const string& $text,
+    int32 $indent,
+    const TerminalCapabilities& $caps
+) : void
+{
+    writeWrapped($out, linesOf($text), $indent, $caps);
+}
+
+public function writeWrapped(
+    Block& $out,
+    const array<string>& $paragraphs,
     int32 $indent,
     const TerminalCapabilities& $caps
 ) : void
 {
     string $margin = spaces($indent);
     int32 $width = pageWidth($caps);
-    usize $lineStart = 0;
     bool $first = true;
     bool $previousIndented = false;
 
-    while ($lineStart <= $text->size()) {
-        usize $lineEnd = findFrom($text, CH_LF, $lineStart);
-
-        if ($lineEnd > $text->size()) {
-            $lineEnd = $text->size();
-        }
-
-        string $line = $text->sub($lineStart, $lineEnd - $lineStart);
+    foreach ($paragraphs as $line) {
         bool $indented = !$line->empty() && $line->byte(0) == CH_SPACE;
 
         if (!$first && !($indented && $previousIndented)) {
-            $out->append(std::io::NEWLINE);
+            $out->push('');
         }
 
         $first = false;
@@ -371,21 +370,40 @@ public function writeWrapped(
             }
 
             usize $take = columnBreak($line->sub($at, $line->size() - $at), $usable);
-
-            $out->append($margin);
+            string $row = $margin;
 
             if ($at > 0) {
-                $out->append(spaces($hang));
+                $row->append(spaces($hang));
             }
 
-            $out->append($line->sub($at, $take));
-            $out->append(std::io::NEWLINE);
+            $row->append($line->sub($at, $take));
+            $out->push($row);
             $at = $at + $take;
 
             while ($at < $line->size() && $line->byte($at) == CH_SPACE) {
                 $at = $at + 1;
             }
         }
+    }
+}
+
+/**
+ * Source paragraphs of `$text`. LF is the break. A trailing LF is an empty
+ * last paragraph.
+ */
+function linesOf(const string& $text) : array<string>
+{
+    array<string> $lines = array<string>();
+    usize $lineStart = 0;
+
+    while ($lineStart <= $text->size()) {
+        usize $lineEnd = findFrom($text, CH_LF, $lineStart);
+
+        if ($lineEnd > $text->size()) {
+            $lineEnd = $text->size();
+        }
+
+        $lines[] = $text->sub($lineStart, $lineEnd - $lineStart);
 
         if ($lineEnd == $text->size()) {
             break;
@@ -393,6 +411,8 @@ public function writeWrapped(
 
         $lineStart = $lineEnd + 1;
     }
+
+    return $lines;
 }
 
 /**
@@ -411,7 +431,7 @@ public function treeBranch(bool $last, bool $unicode) : string
 }
 
 function writeTreeBranch(
-    string& $out,
+    Block& $out,
     const string& $prefix,
     bool $last,
     const string& $label,

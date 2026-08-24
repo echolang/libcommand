@@ -8,17 +8,14 @@ namespace command;
 
 public function renderVersion(const Command& $app) : string
 {
-    string $out = $app->version;
-    $out->append(std::io::NEWLINE);
-
-    return $out;
+    return $app->version;
 }
 
 public function renderUsage(
     const Command& $app,
     const Parsed& $p,
     CLIContext $ctx
-) : string
+) : Block
 {
     return renderUsage($app, $p, $ctx->caps);
 }
@@ -27,9 +24,9 @@ public function renderUsage(
     const Command& $app,
     const Parsed& $p,
     const TerminalCapabilities& $caps
-) : string
+) : Block
 {
-    string $out = '';
+    $out = Block();
     writeHeading($out, 'Usage', $caps);
     writeUsageLines($out, $app, $p);
 
@@ -41,7 +38,7 @@ public function renderError(
     const Command& $app,
     const Parsed& $p,
     CLIContext $ctx
-) : string
+) : Block
 {
     return renderError($e, $app, $p, $ctx->caps);
 }
@@ -51,16 +48,15 @@ public function renderError(
     const Command& $app,
     const Parsed& $p,
     const TerminalCapabilities& $caps
-) : string
+) : Block
 {
-    string $out = '';
+    $out = Block();
     string $badge = styled('error', SGR_ERROR, $caps->color);
-    $out->append("{$badge}: {$e->message()}");
-    $out->append(std::io::NEWLINE);
-    $out->append(std::io::NEWLINE);
+    $out->push("{$badge}: {$e->message()}");
+    $out->push('');
     writeHeading($out, 'Usage', $caps);
     writeUsageLines($out, $app, $p);
-    $out->append(std::io::NEWLINE);
+    $out->push('');
 
     if (!$p->hasCommand) {
         writeWrapped($out, "Run '{$app->name} --help' to see what {$app->name} can do.", 0, $caps);
@@ -77,7 +73,7 @@ public function renderHelp(
     const Command& $app,
     const Parsed& $p,
     CLIContext $ctx
-) : string
+) : Block
 {
     return renderHelp($app, $p, $ctx->caps);
 }
@@ -86,7 +82,7 @@ public function renderHelp(
     const Command& $app,
     const Parsed& $p,
     const TerminalCapabilities& $caps
-) : string
+) : Block
 {
     if ($p->helpTopicId >= 0) {
         return renderOptionHelp($app, $p, $app->options[$p->helpTopicId], $caps);
@@ -99,9 +95,9 @@ function renderHelpPage(
     const Command& $app,
     const Parsed& $p,
     const TerminalCapabilities& $caps
-) : string
+) : Block
 {
-    string $out = '';
+    $out = Block();
 
     // one measuring pass over every option and value on the page. both blocks
     // below line their summaries up at the same column, and measuring twice is
@@ -110,33 +106,31 @@ function renderHelpPage(
 
     if (!$p->hasCommand) {
         writeWrapped($out, "{$app->name} {$app->version} - {$app->summary}.", 0, $caps);
-        $out->append(std::io::NEWLINE);
+        $out->push('');
         writeHeading($out, 'Usage', $caps);
         writeUsageLines($out, $app, $p);
-        $out->append(std::io::NEWLINE);
+        $out->push('');
 
         if ($app->commands->count() > 0) {
             writeHeading($out, 'Commands', $caps);
-            usize $i = 0;
 
-            while ($i < $app->commands->count()) {
-                string $cmdName = styled($app->commands[$i]->name, SGR_INFO, $caps->color);
+            foreach ($app->commands as $cmd) {
+                string $cmdName = styled($cmd->name, SGR_INFO, $caps->color);
                 writeRow(
                     $out,
                     "  {$cmdName}",
-                    2 + textWidth($app->commands[$i]->name),
-                    $app->commands[$i]->summary,
+                    2 + textWidth($cmd->name),
+                    $cmd->summary,
                     '',
                     $column,
                     $caps
                 );
-                $i = $i + 1;
             }
         }
 
         writePositionalBlock($out, $app->positionals, $caps);
         writeCategories($out, $app, $p, $column, $caps);
-        $out->append(std::io::NEWLINE);
+        $out->push('');
 
         if ($app->commands->count() > 0) {
             writeWrapped($out, "Run '{$app->name} <command> --help' for what a command accepts.", 0, $caps);
@@ -147,15 +141,15 @@ function renderHelpPage(
 
     SubcommandInfo $info = $app->commands[$p->command->id];
     writeWrapped($out, "{$app->name} {$info->name} - {$info->summary}.", 0, $caps);
-    $out->append(std::io::NEWLINE);
+    $out->push('');
     writeHeading($out, 'Usage', $caps);
     writeUsageLines($out, $app, $p);
-    $out->append(std::io::NEWLINE);
+    $out->push('');
     writeWrapped($out, $info->description, 0, $caps);
     writePositionalBlock($out, $info->positionals, $caps);
 
     writeCategories($out, $app, $p, $column, $caps);
-    $out->append(std::io::NEWLINE);
+    $out->push('');
     writeWrapped(
         $out,
         "Run '{$app->name} {$info->name} --help <option>' for the full description of one option, for example '{$app->name} {$info->name} --help color'.",
@@ -171,25 +165,22 @@ function renderOptionHelp(
     const Parsed& $p,
     const Option& $option,
     const TerminalCapabilities& $caps
-) : string
+) : Block
 {
-    string $out = '';
+    $out = Block();
     writeHeading($out, $option->spelling(), $caps);
-    $out->append(std::io::NEWLINE);
+    $out->push('');
     writeWrapped($out, $option->description, 4, $caps);
 
-    usize $i = 0;
-
-    while ($i < $option->values->count()) {
-        $out->append(std::io::NEWLINE);
-        $out->append('    ');
-        $out->append(styled($option->values[$i]->name, SGR_SECONDARY, $caps->color));
-        $out->append(std::io::NEWLINE);
-        writeWrapped($out, $option->values[$i]->description, 4, $caps);
-        $i = $i + 1;
+    foreach ($option->values as $value) {
+        $out->push('');
+        string $name = '    ';
+        $name->append(styled($value->name, SGR_SECONDARY, $caps->color));
+        $out->push($name);
+        writeWrapped($out, $value->description, 4, $caps);
     }
 
-    $out->append(std::io::NEWLINE);
+    $out->push('');
 
     if ($option->commands == 0) {
         writeWrapped($out, 'Accepted by: every command.', 0, $caps);
@@ -206,12 +197,12 @@ function renderOptionHelp(
     return $out;
 }
 
-function writeUsageLines(string& $out, const Command& $app, const Parsed& $p) : void
+function writeUsageLines(Block& $out, const Command& $app, const Parsed& $p) : void
 {
     if ($p->hasCommand) {
-        $out->append("  ");
-        $out->append(usageOf($app, $app->commands[$p->command->id]));
-        $out->append(std::io::NEWLINE);
+        string $row = '  ';
+        $row->append(usageOf($app, $app->commands[$p->command->id]));
+        $out->push($row);
         return;
     }
 
@@ -222,21 +213,17 @@ function writeUsageLines(string& $out, const Command& $app, const Parsed& $p) : 
             $line->append(" {$app->positionals->metavar}");
         }
 
-        $out->append($line);
-        $out->append(std::io::NEWLINE);
+        $out->push($line);
         return;
     }
 
-    $out->append("  {$app->name} <command> [options]");
-    $out->append(std::io::NEWLINE);
-    $out->append(std::io::NEWLINE);
-    usize $i = 0;
+    $out->push("  {$app->name} <command> [options]");
+    $out->push('');
 
-    while ($i < $app->commands->count()) {
-        $out->append("  ");
-        $out->append(usageOf($app, $app->commands[$i]));
-        $out->append(std::io::NEWLINE);
-        $i = $i + 1;
+    foreach ($app->commands as $cmd) {
+        string $row = '  ';
+        $row->append(usageOf($app, $cmd));
+        $out->push($row);
     }
 }
 
@@ -252,7 +239,7 @@ function usageOf(const Command& $app, const SubcommandInfo& $info) : string
 }
 
 function writePositionalBlock(
-    string& $out,
+    Block& $out,
     const Positionals& $pos,
     const TerminalCapabilities& $caps
 ) : void
@@ -265,15 +252,15 @@ function writePositionalBlock(
         return;
     }
 
-    $out->append(std::io::NEWLINE);
-    $out->append('  ');
-    $out->append(styled($pos->metavar, SGR_INFO, $caps->color));
-    $out->append(std::io::NEWLINE);
+    $out->push('');
+    string $row = '  ';
+    $row->append(styled($pos->metavar, SGR_INFO, $caps->color));
+    $out->push($row);
     writeWrapped($out, $pos->description, 4, $caps);
 }
 
 function writeCategories(
-    string& $out,
+    Block& $out,
     const Command& $app,
     const Parsed& $p,
     int32 $column,
@@ -282,11 +269,9 @@ function writeCategories(
 {
     array<string> $seen = array<string>();
     string $posCat = pagePositionals($app, $p)->category;
-    usize $i = 0;
 
-    while ($i < $app->options->count()) {
-        string $heading = $app->options[$i]->category;
-        $i = $i + 1;
+    foreach ($app->options as $option) {
+        string $heading = $option->category;
 
         if (containsString($seen, $heading)) {
             continue;
@@ -302,7 +287,7 @@ function writeCategories(
 }
 
 function writeCategory(
-    string& $out,
+    Block& $out,
     const Command& $app,
     const Parsed& $p,
     const string& $heading,
@@ -319,7 +304,7 @@ function writeCategory(
     bool $drawn = false;
 
     if (!$posMeta->empty() && !$posCat->empty() && $heading == $posCat) {
-        $out->append(std::io::NEWLINE);
+        $out->push('');
         writeHeading($out, $heading, $caps);
         string $drawnPos = styled($posMeta, SGR_INFO, $caps->color);
         writeRow(
@@ -334,18 +319,13 @@ function writeCategory(
         $drawn = true;
     }
 
-    usize $i = 0;
-
-    while ($i < $app->options->count()) {
-        Option $option = $app->options[$i];
-        $i = $i + 1;
-
+    foreach ($app->options as $option) {
         if ($option->category != $heading || !$option->accepted($bit)) {
             continue;
         }
 
         if (!$drawn) {
-            $out->append(std::io::NEWLINE);
+            $out->push('');
             writeHeading($out, $heading, $caps);
             $drawn = true;
         }
@@ -364,7 +344,7 @@ function pagePositionals(const Command& $app, const Parsed& $p) : Positionals
 }
 
 function writeOption(
-    string& $out,
+    Block& $out,
     const Option& $option,
     int32 $bit,
     int32 $column,
@@ -383,33 +363,31 @@ function writeOption(
         $caps
     );
 
-    usize $i = 0;
     usize $n = $option->values->count();
 
-    while ($i < $n) {
+    foreach ($option->values as $i => $value) {
         bool $last = $i + 1 == $n;
         string $marker = '';
 
-        if ($option->values[$i]->name == $option->fallback) {
+        if ($value->name == $option->fallback) {
             $marker = 'default';
         }
 
-        if (!$option->values[$i]->accepted($option, $bit) && $bit != 0) {
+        if (!$value->accepted($option, $bit) && $bit != 0) {
             $marker = 'not on this command';
         }
 
-        string $name = styled($option->values[$i]->name, SGR_SECONDARY, $caps->color);
+        string $name = styled($value->name, SGR_SECONDARY, $caps->color);
         writeTreeBranch(
             $out,
             '    ',
             $last,
             $name,
-            $option->values[$i]->summary,
+            $value->summary,
             $marker,
             $column,
             $caps
         );
-        $i = $i + 1;
     }
 }
 
@@ -424,16 +402,12 @@ function summaryColumn(
     int32 $widest = 0;
 
     if (!$p->hasCommand) {
-        usize $i = 0;
-
-        while ($i < $app->commands->count()) {
-            int32 $w = 2 + textWidth($app->commands[$i]->name);
+        foreach ($app->commands as $cmd) {
+            int32 $w = 2 + textWidth($cmd->name);
 
             if ($w > $widest) {
                 $widest = $w;
             }
-
-            $i = $i + 1;
         }
     }
 
@@ -447,33 +421,24 @@ function summaryColumn(
         }
     }
 
-    usize $i = 0;
-
-    while ($i < $app->options->count()) {
-        if (!$app->options[$i]->accepted($bit)) {
-            $i = $i + 1;
+    foreach ($app->options as $option) {
+        if (!$option->accepted($bit)) {
             continue;
         }
 
-        int32 $w = 2 + textWidth($app->options[$i]->spelling());
+        int32 $w = 2 + textWidth($option->spelling());
 
         if ($w > $widest) {
             $widest = $w;
         }
 
-        usize $v = 0;
-
-        while ($v < $app->options[$i]->values->count()) {
-            int32 $vw = 4 + 3 + textWidth($app->options[$i]->values[$v]->name);
+        foreach ($option->values as $value) {
+            int32 $vw = 4 + 3 + textWidth($value->name);
 
             if ($vw > $widest) {
                 $widest = $vw;
             }
-
-            $v = $v + 1;
         }
-
-        $i = $i + 1;
     }
 
     int32 $column = $widest + 2;
@@ -494,11 +459,9 @@ function summaryColumn(
 function acceptedCommands(const Command& $app, const Option& $option) : string
 {
     string $joined = '';
-    usize $i = 0;
 
-    while ($i < $app->commands->count()) {
-        if (($option->commands & $app->commands[$i]->bit) == 0) {
-            $i = $i + 1;
+    foreach ($app->commands as $cmd) {
+        if (($option->commands & $cmd->bit) == 0) {
             continue;
         }
 
@@ -506,8 +469,7 @@ function acceptedCommands(const Command& $app, const Option& $option) : string
             $joined->append(', ');
         }
 
-        $joined->append($app->commands[$i]->name);
-        $i = $i + 1;
+        $joined->append($cmd->name);
     }
 
     return $joined;
@@ -515,14 +477,10 @@ function acceptedCommands(const Command& $app, const Option& $option) : string
 
 function containsString(const array<string>& $items, const string& $needle) : bool
 {
-    usize $i = 0;
-
-    while ($i < $items->count()) {
-        if ($items[$i] == $needle) {
+    foreach ($items as $item) {
+        if ($item == $needle) {
             return true;
         }
-
-        $i = $i + 1;
     }
 
     return false;

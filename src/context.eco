@@ -34,7 +34,11 @@ public class CLIContext
      * Tests reach for `buffer` / `plain` so they never touch the host tty.
      */
     public bool $toStream;
-    public string $captured;
+    public Block $page;
+    /**
+     * Raw VT from `write`. Live paint and CSI, never a finished row.
+     */
+    public string $vt;
 
     command::element::Run? $run;
 
@@ -43,7 +47,8 @@ public class CLIContext
         $this->caps = $caps;
         $this->out = $out;
         $this->toStream = true;
-        $this->captured = '';
+        $this->page = Block();
+        $this->vt = '';
         $this->run = null;
     }
 
@@ -106,9 +111,7 @@ public class CLIContext
 
         command::element::Run $run = command::element::Run($this);
         $this->run = $run;
-        string $open = $run->stepper->open($title);
-        $open->append(std::io::NEWLINE);
-        $this->write($open);
+        $this->line($run->stepper->open($title));
         $run->open = true;
     }
 
@@ -117,34 +120,26 @@ public class CLIContext
         $this->endStepper('');
     }
 
-    public function endStepper(string $message) : void
+    public function endStepper(const string& $message) : void
     {
-        command::element::Run? $cur = $this->run;
-
-        if ($cur == null) {
+        command::element::Run $run = guard $this->run else {
             return;
         }
-
-        command::element::Run $run = guard $cur else {
-            return;
-        }
-
-        $this->run = null;
 
         if (!$run->open) {
+            $this->run = null;
             return;
         }
 
         $run->open = false;
-        string $end = $run->stepper->close($message);
-        $end->append(std::io::NEWLINE);
-        $this->write($end);
+        $this->gap();
+        $this->line($run->stepper->close($message));
+        $this->run = null;
     }
 
     public const function channel() : command::element::Stepper
     {
-        command::element::Run? $cur = $this->run;
-        command::element::Run $run = guard $cur else {
+        command::element::Run $run = guard $this->run else {
             return command::element::Stepper(false, $this->caps);
         }
 
@@ -159,25 +154,41 @@ public class CLIContext
             return;
         }
 
-        string $row = $bar;
-        $row->append(std::io::NEWLINE);
-        $this->write($row);
+        $this->line($bar);
     }
 
+    /**
+     * A finished transcript row. The terminator is `writeline`'s, at the
+     * stream; buffer mode records the row with none.
+     */
+    public function line(const string& $row) : void
+    {
+        if (!$this->toStream) {
+            $this->page->push($row);
+            return;
+        }
+
+        $this->out->writeline($row);
+    }
+
+    public function print(const Block& $block) : void
+    {
+        foreach ($block->rows as $row) {
+            $this->line($row);
+        }
+    }
+
+    /**
+     * Raw VT into `$vt`. Live paint and CSI live here, never a finished row.
+     */
     public function write(const string& $bytes) : void
     {
         if (!$this->toStream) {
-            $this->captured->append($bytes);
+            $this->vt->append($bytes);
             return;
         }
 
         $this->out->write($bytes);
-    }
-
-    public function println(const string& $s) : void
-    {
-        $this->write($s);
-        $this->write(std::io::NEWLINE);
     }
 
     public function printError(const string& $s) : void
@@ -185,13 +196,12 @@ public class CLIContext
         if ($this->run != null) {
             command::SpinnerTheme $t = spinnerTheme($this->caps->unicode);
             $this->gap();
-            $this->println($this->channel()->leadRow($t->outcome(false), outcomeSgr(false), $s));
+            $this->line($this->channel()->leadRow($t->outcome(false), outcomeSgr(false), $s));
             return;
         }
 
         string $badge = styled('error', SGR_ERROR, $this->caps->color);
-        $this->write("{$badge}: {$s}");
-        $this->write(std::io::NEWLINE);
+        $this->line("{$badge}: {$s}");
     }
 }
 

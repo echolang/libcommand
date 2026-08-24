@@ -63,7 +63,7 @@ public struct Option
     public string $metavar;
     public string $fallback;
     public string $summary;
-    public string $description;
+    public array<string> $description;
     public array<OptionValue> $values;
 
     constructor(
@@ -79,7 +79,7 @@ public struct Option
         string $metavar,
         string $fallback,
         string $summary,
-        string $description,
+        array<string> $description,
         array<OptionValue> $values
     )
     {
@@ -286,9 +286,21 @@ public class Command
         $this->color = Arg(-1);
 
         $this->help = $this->flag('help', 'h', 'print this page, or one option in full');
-        $this->describe($this->help, "Print a page. Which page depends on what you put around it:\n  {$name} --help\n  {$name} <command> --help\n  {$name} <command> --help <option>\nThe last form is where the prose lives: the compact page has one line per option, and the paragraphs, the values and the gotchas are one command further in.\nThe option name goes in bare, without its dashes.");
+        array<string> $helpProse = [
+            'Print a page. Which page depends on what you put around it:',
+            "  {$name} --help",
+            "  {$name} <command> --help",
+            "  {$name} <command> --help <option>",
+            'The last form is where the prose lives: the compact page has one line per option, and the paragraphs, the values and the gotchas are one command further in.',
+            'The option name goes in bare, without its dashes.',
+        ];
+        $this->describe($this->help, $helpProse);
         $this->versionFlag = $this->flag('version', 'v', 'print the version');
-        $this->describe($this->versionFlag, "Print the version this program was built as, and exit:\n  {$name} --version");
+        array<string> $versionProse = [
+            'Print the version this program was built as, and exit:',
+            "  {$name} --version",
+        ];
+        $this->describe($this->versionFlag, $versionProse);
 
         array<OptionValue> $colors = array<OptionValue>();
         $colors[] = OptionValue('auto', 'a terminal, and nothing else', 'Colour a terminal and leave a pipe alone.');
@@ -299,7 +311,13 @@ public class Command
         $this->alias($this->color, 'colour');
         $this->fallback($this->color, 'auto');
         $this->values($this->color, $colors);
-        $this->describe($this->color, "Colourise the help page and the argv refusals:\n  {$name} --color always --help\n'always' puts escape sequences into a file or a pipe. 'never' is the other direction, and 'auto' colours a terminal and nothing else.\nNO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured.");
+        array<string> $colorProse = [
+            'Colourise the help page and the argv refusals:',
+            "  {$name} --color always --help",
+            "'always' puts escape sequences into a file or a pipe. 'never' is the other direction, and 'auto' colours a terminal and nothing else.",
+            'NO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured.',
+        ];
+        $this->describe($this->color, $colorProse);
     }
 
     public function command(string $name, string $summary, string $description) : Subcommand
@@ -381,12 +399,22 @@ public class Command
 
     public function describe(Flag $opt, string $description) : void
     {
-        setDescription($this, $opt->id, $description);
+        setDescription($this, $opt->id, linesOf($description));
+    }
+
+    public function describe(Flag $opt, const array<string>& $lines) : void
+    {
+        setDescription($this, $opt->id, $lines);
     }
 
     public function describe(Arg $opt, string $description) : void
     {
-        setDescription($this, $opt->id, $description);
+        setDescription($this, $opt->id, linesOf($description));
+    }
+
+    public function describe(Arg $opt, const array<string>& $lines) : void
+    {
+        setDescription($this, $opt->id, $lines);
     }
 
     public function category(Flag $opt, string $heading) : void
@@ -576,6 +604,7 @@ function thisAdd(
     rejectTaken($app, $name, $shorthand);
 
     int32 $id = i32Of($app->options->count());
+    array<string> $noProse = array<string>();
     array<OptionValue> $none = array<OptionValue>();
     $app->options[] = Option(
         $id,
@@ -590,7 +619,7 @@ function thisAdd(
         $metavar,
         '',
         $summary,
-        '',
+        $noProse,
         $none
     );
 
@@ -653,7 +682,7 @@ function excludeIds(Command $app, int32 $a, int32 $b) : void
     $app->options[$b] = $right;
 }
 
-function setDescription(Command $app, int32 $id, string $description) : void
+function setDescription(Command $app, int32 $id, const array<string>& $description) : void
 {
     Option $row = $app->options[$id];
     $row->description = $description;

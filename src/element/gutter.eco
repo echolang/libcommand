@@ -36,46 +36,44 @@ class Run
  *
  * Off-run there is no left edge to hang a box from, so it degrades to the
  * title and an indented body - which is the honest drawing of the same thing.
+ *
+ * A string is split on newlines. Several rows are an array.
  */
-public function noteFrame(const Stepper& $s, const string& $title, const string& $body) : string
+public function noteFrame(const Stepper& $s, const string& $title, const string& $body) : command::Block
 {
-    array<string> $lines = str::split($body, "\n")->owned();
+    return noteFrame($s, $title, command::linesOf($body));
+}
+
+public function noteFrame(const Stepper& $s, const string& $title, const array<string>& $body) : command::Block
+{
+    $out = command::Block();
 
     if (!$s->gutter) {
-        string $flat = $s->leadRow($s->theme->stepDone, command::SGR_MUTED, $title);
-        usize $j = 0;
+        $out->push($s->leadRow($s->theme->stepDone, command::SGR_MUTED, $title));
 
-        while ($j < $lines->count()) {
-            $flat->append(std::io::NEWLINE);
-            $flat->append($s->row($lines[$j]));
-            $j = $j + 1;
+        foreach ($body as $bodyRow) {
+            $out->push($s->row($bodyRow));
         }
 
-        return $flat;
+        return $out;
     }
 
     command::PromptTheme $theme = $s->theme;
     bool $color = $s->caps->color;
-    int32 $inner = noteInner($s, $title, $lines);
+    int32 $inner = noteInner($s, $title, $body);
     string $edge = command::styled($theme->bar, command::SGR_MUTED, $color);
     string $blank = command::spaces($inner);
     string $hollow = "{$blank}{$edge}";
 
     string $rule = command::repeatCell($theme->barH, $inner - command::textWidth($title) - 1);
     string $head = "{$title} {$rule}{$theme->cornerTr}";
-    string $out = $s->leadRow($theme->stepDone, command::SGR_MUTED, $head);
+    $out->push($s->leadRow($theme->stepDone, command::SGR_MUTED, $head));
+    $out->push($s->row($hollow));
 
-    $out->append(std::io::NEWLINE);
-    $out->append($s->row($hollow));
-
-    usize $i = 0;
-
-    while ($i < $lines->count()) {
-        string $pad = command::spaces($inner - command::textWidth($lines[$i]));
-        string $line = "{$lines[$i]}{$pad}{$edge}";
-        $out->append(std::io::NEWLINE);
-        $out->append($s->row($line));
-        $i = $i + 1;
+    foreach ($body as $bodyRow) {
+        string $pad = command::spaces($inner - command::textWidth($bodyRow));
+        string $line = "{$bodyRow}{$pad}{$edge}";
+        $out->push($s->row($line));
     }
 
     // the foot is the one row that runs through the channel instead of
@@ -85,10 +83,8 @@ public function noteFrame(const Stepper& $s, const string& $title, const string&
     string $foot = command::styled($theme->connectLeft, command::SGR_MUTED, $color);
     $foot->append("{$rest}{$theme->cornerBr}");
 
-    $out->append(std::io::NEWLINE);
-    $out->append($s->row($hollow));
-    $out->append(std::io::NEWLINE);
-    $out->append($foot);
+    $out->push($s->row($hollow));
+    $out->push($foot);
 
     return $out;
 }
@@ -96,16 +92,13 @@ public function noteFrame(const Stepper& $s, const string& $title, const string&
 function noteInner(const Stepper& $s, const string& $title, const array<string>& $lines) : int32
 {
     int32 $inner = command::textWidth($title) + 2;
-    usize $i = 0;
 
-    while ($i < $lines->count()) {
-        int32 $w = command::textWidth($lines[$i]) + 2;
+    foreach ($lines as $line) {
+        int32 $w = command::textWidth($line) + 2;
 
         if ($w > $inner) {
             $inner = $w;
         }
-
-        $i = $i + 1;
     }
 
     int32 $room = $s->room() - 1;

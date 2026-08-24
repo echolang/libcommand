@@ -20,20 +20,19 @@ public class Tree
 {
     public command::CLIContext $ctx;
     public Node $root;
-    public string $captured;
+    public command::Block $captured;
 
     constructor(command::CLIContext $ctx, string $label)
     {
         $this->ctx = $ctx;
         $this->root = Node($label);
-        $this->captured = '';
+        $this->captured = command::Block();
     }
 
-    public const function render() : string
+    public const function render() : command::Block
     {
-        string $out = '';
-        $out->append($this->root->label);
-        $out->append(std::io::NEWLINE);
+        $out = command::Block();
+        $out->push($this->root->label);
         writeChildren($out, $this->root->children, '', $this->ctx->caps);
 
         return $out;
@@ -41,23 +40,22 @@ public class Tree
 
     public function display() : void
     {
-        string $page = $this->render();
+        $page = $this->render();
         writeOrCapture($this->ctx, $this->captured, $page);
     }
 }
 
 function writeChildren(
-    string& $out,
+    command::Block& $out,
     const array<Node>& $kids,
     const string& $prefix,
     const command::TerminalCapabilities& $caps
 ) : void
 {
     command::TreeTheme $theme = command::treeTheme($caps->unicode);
-    usize $i = 0;
     usize $n = $kids->count();
 
-    while ($i < $n) {
+    foreach ($kids as $i => $kid) {
         bool $last = $i + 1 == $n;
         string $next = $theme->pipe;
         string $branch = $theme->branch;
@@ -67,11 +65,10 @@ function writeChildren(
             $branch = $theme->last;
         }
 
-        $out->append($prefix);
-        $out->append($branch);
-        $out->append($kids[$i]->label);
-        $out->append(std::io::NEWLINE);
-        writeChildren($out, $kids[$i]->children, "{$prefix}{$next}", $caps);
-        $i = $i + 1;
+        string $row = $prefix;
+        $row->append($branch);
+        $row->append($kid->label);
+        $out->push($row);
+        writeChildren($out, $kid->children, "{$prefix}{$next}", $caps);
     }
 }

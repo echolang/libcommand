@@ -10,7 +10,7 @@ test live_noninteractive_paint_is_silent
     $line->paint('secret');
     $line->erase();
 
-    assert($line->ctx->captured == '', 'no rewrite in a log');
+    assert($line->ctx->vt == '', 'no rewrite in a log');
 }
 
 test live_noninteractive_commit_is_a_line
@@ -18,7 +18,9 @@ test live_noninteractive_commit_is_a_line
     element::LiveLine $line = element::LiveLine(command::CLIContext::plain());
     $line->commit('done');
 
-    assert($line->ctx->captured == "done\n", 'full line');
+    assert($line->ctx->vt == '', 'not VT');
+    assert($line->ctx->page->rows->count() == 1, 'full line');
+    assert($line->ctx->page->rows[0] == 'done', 'full line');
 }
 
 test live_interactive_paint_rewrites
@@ -27,8 +29,8 @@ test live_interactive_paint_rewrites
     element::LiveLine $line = element::LiveLine(command::CLIContext::buffer($caps));
     $line->paint('hello');
 
-    assert($line->ctx->captured->starts("\r\x1b[K"), 'CR EL');
-    assert($line->ctx->captured->contains('hello'), 'text');
+    assert($line->ctx->vt->starts(command::CSI_ERASE_LINE), 'CR EL');
+    assert($line->ctx->vt->contains('hello'), 'text');
 }
 
 test live_interactive_commit_ends_a_line
@@ -37,5 +39,5 @@ test live_interactive_commit_ends_a_line
     element::LiveLine $line = element::LiveLine(command::CLIContext::buffer($caps));
     $line->commit('done');
 
-    assert($line->ctx->captured->ends("done\n"), 'newline');
+    assert($line->ctx->vt->ends(str::concat('done', keyCh(command::CH_LF))), 'newline');
 }

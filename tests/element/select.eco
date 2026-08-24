@@ -32,8 +32,8 @@ test select_radio_down_then_enter
     assert($done, 'confirmed');
     array<string> $got = $q->result();
     assert($got[0] == 'Banana', 'second');
-    assert($q->region->ctx->captured->contains('fruit'), 'title');
-    assert($q->region->ctx->captured->contains('Banana'), 'summary');
+    assert($q->region->ctx->vt->contains('fruit'), 'title');
+    assert($q->region->ctx->vt->contains('Banana'), 'summary');
 }
 
 test select_radio_pick_moves_the_cursor
@@ -81,12 +81,12 @@ test select_radio_ascii_glyphs
 {
     element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
     fruits($q);
-    string $frame = $q->frame();
+    $frame = $q->frame();
 
-    assert($frame->contains('(*) '), 'on');
-    assert($frame->contains('( ) '), 'off');
-    assert($frame->contains('> '), 'pointer');
-    assert($frame->contains('Apple'), 'label');
+    assert(blockHas($frame, '(*) '), 'on');
+    assert(blockHas($frame, '( ) '), 'off');
+    assert(blockHas($frame, '> '), 'pointer');
+    assert(blockHas($frame, 'Apple'), 'label');
 }
 
 test select_radio_unicode_glyphs
@@ -94,11 +94,11 @@ test select_radio_unicode_glyphs
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 80, false);
     element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('fruit');
     fruits($q);
-    string $frame = $q->frame();
+    $frame = $q->frame();
 
-    assert($frame->contains('● '), 'on');
-    assert($frame->contains('○ '), 'off');
-    assert($frame->contains('❯ '), 'pointer');
+    assert(blockHas($frame, '● '), 'on');
+    assert(blockHas($frame, '○ '), 'off');
+    assert(blockHas($frame, '❯ '), 'pointer');
 }
 
 test select_radio_colour_on_focus
@@ -106,9 +106,9 @@ test select_radio_colour_on_focus
     command::TerminalCapabilities $caps = command::TerminalCapabilities(true, false, 80, false);
     element::Select $q = command::CLIContext::buffer($caps)->create<element::Select>('fruit');
     fruits($q);
-    string $frame = $q->frame();
+    $frame = $q->frame();
 
-    assert($frame->contains(command::SGR_INFO), 'info');
+    assert(blockHas($frame, command::SGR_INFO), 'info');
 }
 
 test select_page_window_follows_cursor
@@ -122,18 +122,18 @@ test select_page_window_follows_cursor
 
     // the glyph is part of every needle: the footer is prose, and a bare 'c'
     // matches the 'c' in 'confirm'
-    string $first = $q->frame();
-    assert($first->contains(') a'), 'a');
-    assert($first->contains(') b'), 'b');
-    assert(!$first->contains(') c'), 'not c');
-    assert($first->contains('to navigate'), 'the keys are spelled out');
+    $first = $q->frame();
+    assert(blockHas($first, ') a'), 'a');
+    assert(blockHas($first, ') b'), 'b');
+    assert(!blockHas($first, ') c'), 'not c');
+    assert(blockHas($first, 'to navigate'), 'the keys are spelled out');
 
     $q->feed(element::Key::down);
     $q->feed(element::Key::down);
-    string $moved = $q->frame();
-    assert($moved->contains(') b'), 'b still');
-    assert($moved->contains(') c'), 'c in view');
-    assert(!$moved->contains("\n  > (*) a"), 'a scrolled out');
+    $moved = $q->frame();
+    assert(blockHas($moved, ') b'), 'b still');
+    assert(blockHas($moved, ') c'), 'c in view');
+    assert(!blockHas($moved, ') a'), 'a scrolled out');
 }
 
 test select_checks_space_toggles
@@ -186,7 +186,7 @@ test select_checks_empty_ok
 
     assert($done, 'allowed');
     assert($q->result()->empty(), 'none');
-    assert($q->region->ctx->captured->contains('(none)'), 'summary');
+    assert($q->region->ctx->vt->contains('(none)'), 'summary');
 }
 
 test select_checks_pick
@@ -212,10 +212,10 @@ test select_checks_ascii_glyphs
     );
     $q->choice('Logging');
     $q->pick('Logging');
-    string $frame = $q->frame();
+    $frame = $q->frame();
 
-    assert($frame->contains('[x] '), 'on');
-    assert($frame->contains('up/down to navigate - Space: select - Enter: confirm'), 'hint');
+    assert(blockHas($frame, '[x] '), 'on');
+    assert(blockHas($frame, 'up/down to navigate - Space: select - Enter: confirm'), 'hint');
 }
 
 test select_numbered_radio
@@ -223,8 +223,8 @@ test select_numbered_radio
     element::Select $q = command::CLIContext::plain()->create<element::Select>('fruit');
     fruits($q);
 
-    assert($q->numbered()->contains('1) Apple'), 'one');
-    assert($q->numbered()->contains('2) Banana'), 'two');
+    assert(blockHas($q->numbered(), '1) Apple'), 'one');
+    assert(blockHas($q->numbered(), '2) Banana'), 'two');
 
     array<string>? $got = $q->tryAnswer('2');
     assert($got != null, 'ok');
@@ -343,7 +343,13 @@ test select_in_a_session_hangs_off_the_bar
     $q->choice('a');
     $q->choice('b');
 
-    string $want = "◆  Pick one\n│  ● a\n│  ○ b\n│  ↑/↓ to navigate • Enter: confirm\n└";
+    $want = pic([
+        '◆  Pick one',
+        '│  ● a',
+        '│  ○ b',
+        '│  ↑/↓ to navigate • Enter: confirm',
+        '└',
+    ]);
 
     assert($q->frame() == $want, 'a step, two bar rows, the keys, and the cap');
 }
@@ -356,7 +362,7 @@ test select_in_a_session_drops_the_pointer
     element::Select $q = $ctx->create<element::Select>('Pick one', element::SelectKind::radio);
     $q->choice('a');
 
-    assert(!$q->frame()->contains('❯'), 'colour marks focus in a run');
+    assert(!blockHas($q->frame(), '❯'), 'colour marks focus in a run');
 }
 
 test select_on_its_own_keeps_the_pointer
@@ -367,7 +373,11 @@ test select_on_its_own_keeps_the_pointer
 
     // no bar and no cap off-session; the keys are a body row either way
     assert(
-        $q->frame() == "  Pick one\n  ❯ ● a\n  ↑/↓ to navigate • Enter: confirm",
+        $q->frame() == pic([
+            '  Pick one',
+            '  ❯ ● a',
+            '  ↑/↓ to navigate • Enter: confirm',
+        ]),
         'the old shape, still two spaces'
     );
 }
@@ -381,7 +391,7 @@ test select_in_a_session_dims_what_is_not_focused
     $q->choice('a');
     $q->choice('b');
 
-    array<string> $rows = str::split($q->frame(), "\n")->owned();
+    array<string> $rows = $q->frame()->rows;
 
     assert(!$rows[1]->contains(command::SGR_DIM), 'the focused row is plain');
     assert($rows[1]->contains(command::SGR_SUCCESS), 'and its marker is the answer');
@@ -399,7 +409,7 @@ test select_in_a_session_keeps_a_tick_lit_off_the_cursor
     $q->pick('Logging');
     $q->feed(element::Key::down);
 
-    array<string> $rows = str::split($q->frame(), "\n")->owned();
+    array<string> $rows = $q->frame()->rows;
 
     assert($rows[1]->contains(command::SGR_SUCCESS), 'a ticked box stays green');
     assert($rows[1]->contains(command::SGR_DIM), 'and its label still dims off the cursor');
@@ -419,7 +429,7 @@ test select_summary_is_two_rows_in_a_session
     $q->pick('Caching');
     $q->feed(element::Key::enter);
 
-    assert($q->region->ctx->captured->contains("◇  Which?\n│  Logging, Caching"), 'title, then the answer');
+    assert($q->region->ctx->vt->contains("◇  Which?\n│  Logging, Caching"), 'title, then the answer');
 }
 
 test select_summary_is_one_row_on_its_own
@@ -430,5 +440,5 @@ test select_summary_is_one_row_on_its_own
     $q->pick('Logging');
     $q->feed(element::Key::enter);
 
-    assert($q->region->ctx->captured->contains('  Which?  Logging'), 'one line, as before');
+    assert($q->region->ctx->vt->contains('  Which?  Logging'), 'one line, as before');
 }

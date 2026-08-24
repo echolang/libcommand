@@ -15,7 +15,7 @@ $t->border = true;
 $t->row(['Help', 'ready']);
 $t->row(['Tables', 'ready']);
 $t->display();
-$ctx->println('');
+$ctx->line('');
 
 $tree = $ctx->create<element::Tree>('libcommand');
 $cli = element::Node('cli');

@@ -7,28 +7,31 @@ use command::element;
 test region_noninteractive_paint_is_silent
 {
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
-    $r->paint("a\nb");
+    $r->paint(pic(['a', 'b']));
     $r->erase();
 
-    assert($r->ctx->captured == '', 'no rewrite in a log');
+    assert($r->ctx->vt == '', 'no rewrite in a log');
 }
 
 test region_noninteractive_commit_is_the_frame
 {
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
-    $r->commit("a\nb");
+    $r->commit(pic(['a', 'b']));
 
-    assert($r->ctx->captured == "a\nb\n", 'full frame');
+    assert($r->ctx->vt == '', 'not VT');
+    assert($r->ctx->page->rows->count() == 2, 'full frame');
+    assert($r->ctx->page->rows[0] == 'a', 'full frame');
+    assert($r->ctx->page->rows[1] == 'b', 'full frame');
 }
 
 test region_interactive_first_paint_has_no_up
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->paint("a\nb\nc");
+    $r->paint(pic(['a', 'b', 'c']));
 
-    assert(!$r->ctx->captured->contains("A"), 'nothing to climb over on the first paint');
-    assert($r->ctx->captured->ends("a\nb\nc"), 'frame');
+    assert(!$r->ctx->vt->contains("A"), 'nothing to climb over on the first paint');
+    assert($r->ctx->vt->contains('c'), 'frame');
     assert($r->height == 3, 'three rows');
 }
 
@@ -36,12 +39,13 @@ test region_interactive_second_paint_climbs
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->paint("a\nb\nc");
-    $r->ctx->captured = '';
-    $r->paint("x\ny");
+    $r->paint(pic(['a', 'b', 'c']));
+    $r->ctx->vt = '';
+    $r->paint(pic(['x', 'y']));
 
-    assert($r->ctx->captured->starts("\x1b[2A\r\x1b[J"), 'up then erase');
-    assert($r->ctx->captured->contains("x\ny"), 'new frame');
+    assert($r->ctx->vt->starts(str::concat(command::cursorUp(2), command::CSI_ERASE_DOWN)), 'up then erase');
+    assert($r->ctx->vt->contains('x'), 'new frame');
+    assert($r->ctx->vt->contains('y'), 'new frame');
     assert($r->height == 2, 'shorter');
 }
 
@@ -49,11 +53,11 @@ test region_interactive_erase_climbs
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->paint("a\nb");
-    $r->ctx->captured = '';
+    $r->paint(pic(['a', 'b']));
+    $r->ctx->vt = '';
     $r->erase();
 
-    assert($r->ctx->captured->starts("\x1b[1A\r\x1b[J"), 'up one, erase');
+    assert($r->ctx->vt->starts(str::concat(command::cursorUp(1), command::CSI_ERASE_DOWN)), 'up one, erase');
     assert($r->height == 0, 'gone');
 }
 
@@ -61,9 +65,9 @@ test region_interactive_commit_ends_a_line
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->commit('done');
+    $r->commit(command::Block('done'));
 
-    assert($r->ctx->captured->contains("done\n"), 'newline');
+    assert($r->ctx->vt->contains('done'), 'newline');
     assert($r->height == 0, 'left the region');
 }
 
@@ -75,20 +79,20 @@ test region_hides_the_terminal_cursor_while_a_frame_is_up
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->paint("a\nb");
+    $r->paint(pic(['a', 'b']));
 
-    assert($r->ctx->captured->starts(command::CURSOR_HIDE), 'gone before the first frame');
-    assert(!$r->ctx->captured->contains(command::CURSOR_SHOW), 'and stays gone');
+    assert($r->ctx->vt->starts(command::CURSOR_HIDE), 'gone before the first frame');
+    assert(!$r->ctx->vt->contains(command::CURSOR_SHOW), 'and stays gone');
 
-    $r->ctx->captured = '';
-    $r->paint("c\nd");
+    $r->ctx->vt = '';
+    $r->paint(pic(['c', 'd']));
 
-    assert(!$r->ctx->captured->contains(command::CURSOR_HIDE), 'hidden once, not per paint');
+    assert(!$r->ctx->vt->contains(command::CURSOR_HIDE), 'hidden once, not per paint');
 
-    $r->ctx->captured = '';
-    $r->commit('done');
+    $r->ctx->vt = '';
+    $r->commit(command::Block('done'));
 
-    assert($r->ctx->captured->ends(command::CURSOR_SHOW), 'back when the region is left');
+    assert($r->ctx->vt->ends(command::CURSOR_SHOW), 'back when the region is left');
     assert(!$r->hidden, 'and the region knows it');
 }
 
@@ -96,23 +100,23 @@ test region_erase_brings_the_cursor_back
 {
     command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::buffer($caps));
-    $r->paint("a\nb");
-    $r->ctx->captured = '';
+    $r->paint(pic(['a', 'b']));
+    $r->ctx->vt = '';
     $r->erase();
 
-    assert($r->ctx->captured->ends(command::CURSOR_SHOW), 'an erased region leaves no cursor behind');
+    assert($r->ctx->vt->ends(command::CURSOR_SHOW), 'an erased region leaves no cursor behind');
 
-    $r->ctx->captured = '';
+    $r->ctx->vt = '';
     $r->erase();
 
-    assert($r->ctx->captured == '', 'and a second erase says nothing');
+    assert($r->ctx->vt == '', 'and a second erase says nothing');
 }
 
 test region_noninteractive_never_touches_the_cursor
 {
     element::LiveRegion $r = element::LiveRegion(command::CLIContext::plain());
-    $r->paint("a\nb");
-    $r->commit('done');
+    $r->paint(pic(['a', 'b']));
+    $r->commit(command::Block('done'));
 
-    assert(!$r->ctx->captured->contains("\x1b["), 'a log gets the frame and nothing else');
+    assert(!$r->ctx->vt->contains("\x1b["), 'a log gets the frame and nothing else');
 }

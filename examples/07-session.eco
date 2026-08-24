@@ -20,7 +20,7 @@ $types = ['TypeScript', 'JavaScript', 'CoffeeScript'];
 $type = element::select($ctx, 'Pick a project type', $types);
 
 $ctx->gap();
-$ctx->println(element::noteFrame($ctx->channel(), 'Heads up', "This writes into {$dir}\nand does not ask again."));
+$ctx->print(element::noteFrame($ctx->channel(), 'Heads up', "This writes into {$dir}\nand does not ask again."));
 
 // printError during a run is a mark on the channel, not an error: badge
 $ctx->printError('the directory already exists, overwriting');

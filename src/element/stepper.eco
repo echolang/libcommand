@@ -65,9 +65,9 @@ public struct Stepper
 
     /**
      * The last column is deliberately never used. LiveRegion counts its rows
-     * by counting newlines and climbs that many lines to repaint; a row that
-     * reaches the full width wraps, the terminal then holds one more row than
-     * the region believes, and the next repaint erases the wrong block.
+     * and climbs that many lines to repaint; a row that reaches the full width
+     * wraps, the terminal then holds one more row than the region believes,
+     * and the next repaint erases the wrong block.
      */
     const function room() : int32
     {
@@ -118,15 +118,11 @@ public struct Stepper
      */
     const function channelSgr(StepState $state) : string
     {
-        if ($state == StepState::active) {
-            return command::SGR_SECONDARY;
-        }
-
-        if ($state == StepState::failed) {
-            return command::SGR_WARNING;
-        }
-
-        return command::SGR_MUTED;
+        return match ($state) {
+            .active => command::SGR_SECONDARY,
+            .failed => command::SGR_WARNING,
+            .done => command::SGR_MUTED,
+        };
     }
 
     /**
@@ -245,41 +241,25 @@ public struct Stepper
 
     const function close(const string& $message) : string
     {
-        string $out = $this->spacer();
-
-        if (!$out->empty()) {
-            $out->append(std::io::NEWLINE);
-        }
-
-        $out->append($this->leadRow($this->theme->barEnd, command::SGR_MUTED, $message));
-
-        return $out;
+        return $this->leadRow($this->theme->barEnd, command::SGR_MUTED, $message);
     }
 
     const function stateSymbol(StepState $state) : string
     {
-        if ($state == StepState::active) {
-            return $this->theme->stepActive;
-        }
-
-        if ($state == StepState::failed) {
-            return $this->theme->stepError;
-        }
-
-        return $this->theme->stepDone;
+        return match ($state) {
+            .active => $this->theme->stepActive,
+            .failed => $this->theme->stepError,
+            .done => $this->theme->stepDone,
+        };
     }
 
     const function stateSgr(StepState $state) : string
     {
-        if ($state == StepState::active) {
-            return command::SGR_SECONDARY;
-        }
-
-        if ($state == StepState::failed) {
-            return command::SGR_WARNING;
-        }
-
-        return command::SGR_SUCCESS;
+        return match ($state) {
+            .active => command::SGR_SECONDARY,
+            .failed => command::SGR_WARNING,
+            .done => command::SGR_SUCCESS,
+        };
     }
 }
 
@@ -288,15 +268,13 @@ public struct Stepper
  * row. `$rows` is whatever the element handed over - its live body while it
  * runs, its summary once it is answered.
  */
-function frameRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows, StepState $state) : string
+function frameRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows, StepState $state) : command::Block
 {
-    string $out = $s->leadRow($s->stateSymbol($state), $s->stateSgr($state), $title);
-    usize $i = 0;
+    $out = command::Block();
+    $out->push($s->leadRow($s->stateSymbol($state), $s->stateSgr($state), $title));
 
-    while ($i < $rows->count()) {
-        $out->append(std::io::NEWLINE);
-        $out->append($s->stateRow($rows[$i], $state));
-        $i = $i + 1;
+    foreach ($rows as $row) {
+        $out->push($s->stateRow($row, $state));
     }
 
     return $out;
@@ -312,22 +290,20 @@ function frameRowsOf(const Stepper& $s, const string& $title, const array<string
  * On its own there is no bar to hang a second row from, so the value joins
  * the title on one line.
  */
-function summaryRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows) : string
+function summaryRowsOf(const Stepper& $s, const string& $title, const array<string>& $rows) : command::Block
 {
     if ($s->gutter) {
         return frameRowsOf($s, $title, $rows, .done);
     }
 
     string $body = $title;
-    usize $i = 0;
 
-    while ($i < $rows->count()) {
+    foreach ($rows as $row) {
         $body->append('  ');
-        $body->append($rows[$i]);
-        $i = $i + 1;
+        $body->append($row);
     }
 
-    return $s->leadRow('', '', $body);
+    return command::Block($s->leadRow('', '', $body));
 }
 
 /**
@@ -339,22 +315,19 @@ function summaryRowsOf(const Stepper& $s, const string& $title, const array<stri
  * also how a summary and the numbered fallback are drawn, and neither of
  * those is a frame anyone is still typing at.
  */
-function stepFrame<T : Step>(const Stepper& $s, const T& $step, StepState $state) : string
+function stepFrame<T : Step>(const Stepper& $s, const T& $step, StepState $state) : command::Block
 {
-    string $out = frameRowsOf($s, $step->head(), $step->body($s->context()), $state);
+    $out = frameRowsOf($s, $step->head(), $step->body($s->context()), $state);
     string $foot = $s->foot($state);
 
-    if ($foot->empty()) {
-        return $out;
+    if (!$foot->empty()) {
+        $out->push($foot);
     }
-
-    $out->append(std::io::NEWLINE);
-    $out->append($foot);
 
     return $out;
 }
 
-function stepSummary<T : Step>(const Stepper& $s, const T& $step) : string
+function stepSummary<T : Step>(const Stepper& $s, const T& $step) : command::Block
 {
     return summaryRowsOf($s, $step->head(), $step->summary($s->context()));
 }
@@ -366,9 +339,9 @@ function stepSummary<T : Step>(const Stepper& $s, const T& $step) : string
  */
 function settle<T : Step>(const Stepper& $s, const T& $step, LiveRegion $region) : void
 {
-    string $line = stepSummary($s, $step);
+    $done = stepSummary($s, $step);
     $region->erase();
-    $region->commit($line);
+    $region->commit($done);
 }
 
 /**

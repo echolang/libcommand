@@ -195,14 +195,14 @@ public class Select : Step
         return collectPicks($this);
     }
 
-    public function frame() : string
+    public function frame() : command::Block
     {
         $this->ensureWindow();
 
         return stepFrame($this->channel(), $this, StepState::active);
     }
 
-    public function numbered() : string
+    public function numbered() : command::Block
     {
         return drawNumbered($this);
     }

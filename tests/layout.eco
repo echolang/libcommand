@@ -87,18 +87,19 @@ test live_width_zero_is_eighty_and_does_not_cap
 test heading_ascii_is_the_words
 {
     command::TerminalCapabilities $c = command::plain();
-    string $out = '';
+    $out = command::Block();
     command::writeHeading($out, 'Usage', $c);
 
-    assert(command::stripSgr($out) == "Usage\n", 'no bar, no rule');
+    assert($out->rows->count() == 1, 'one row');
+    assert(command::stripSgr($out->rows[0]) == 'Usage', 'no bar, no rule');
 }
 
 test heading_unicode_has_a_bar
 {
     command::TerminalCapabilities $c = command::TerminalCapabilities(false, true, 40, true);
-    string $out = '';
+    $out = command::Block();
     command::writeHeading($out, 'Usage', $c);
-    string $plain = command::stripSgr($out);
+    string $plain = command::stripSgr($out->rows[0]);
 
     assert($plain->starts('▌ Usage'), 'left bar');
     assert($plain->contains('─'), 'dim rule');
@@ -119,21 +120,37 @@ test tree_branch_unicode
 test wrap_keeps_a_short_line
 {
     command::TerminalCapabilities $c = command::plain();
-    string $out = '';
+    $out = command::Block();
     command::writeWrapped($out, 'hello', 0, $c);
 
-    assert($out == "hello\n", 'one line');
+    assert($out->rows->count() == 1, 'one line');
+    assert($out->rows[0] == 'hello', 'the words');
 }
 
 test wrap_breaks_on_spaces
 {
     command::TerminalCapabilities $c = command::TerminalCapabilities(false, false, 20, true);
-    string $out = '';
+    $out = command::Block();
     command::writeWrapped($out, 'one two three four five six', 0, $c);
-    string $plain = command::stripSgr($out);
 
-    assert($plain->contains("\n"), 'wrapped');
-    assert(!$plain->contains('one two three four five six\n'), 'not one long line');
+    assert($out->rows->count() > 1, 'wrapped');
+}
+
+test wrap_array_is_the_same_picture_as_the_joined_string
+{
+    command::TerminalCapabilities $c = command::plain();
+    array<string> $lines = [
+        'Print a page.',
+        '  greet --help',
+        '  greet build --help',
+        'The last form.',
+    ];
+    $fromString = command::Block();
+    $fromArray = command::Block();
+    command::writeWrapped($fromString, str::join($lines, "\n"), 0, $c);
+    command::writeWrapped($fromArray, $lines, 0, $c);
+
+    assert($fromString == $fromArray, 'the array is the stored form, not a join');
 }
 
 test text_width_counts_columns_not_bytes

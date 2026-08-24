@@ -13,7 +13,7 @@ $r = $app->parse(env::argv());
 if ($r->error != null) {
     command::Error $e = $r->error ?? .noCommand;
     command::CLIContext $err = .from($r->parsed, $app, .stderr);
-    $err->write(command::renderError($e, $app, $r->parsed, $err));
+    $err->print(command::renderError($e, $app, $r->parsed, $err));
     env::exit(1);
 }
 ```
@@ -42,7 +42,11 @@ $app->positional($build, '<sources...>', 'the files', 'Loose files become the ma
 command::Arg $out = $app->arg('output', 'o', '<file>', 'where the executable is written');
 $app->category($out, 'What is built');
 $app->require($out, $build);
-$app->describe($out, "The path of the binary.\n  greet build -o app src/*.eco");
+array<string> $outProse = [
+    'The path of the binary.',
+    '  greet build -o app src/*.eco',
+];
+$app->describe($out, $outProse);
 ```
 
 `require($out, $build)` also accepts the flag on that command, so you don't have to write both.
@@ -94,18 +98,18 @@ So, what happens if this fails? The driver is four branches: refusal, version, h
 if ($r->error != null) {
     command::Error $e = $r->error ?? .noCommand;
     command::CLIContext $err = .from($r->parsed, $app, .stderr);
-    $err->write(command::renderError($e, $app, $r->parsed, $err));
+    $err->print(command::renderError($e, $app, $r->parsed, $err));
     env::exit(1);
 }
 
 if ($r->parsed->wantsVersion) {
-    io::print(command::renderVersion($app));
+    io::println(command::renderVersion($app));
     env::exit(0);
 }
 
 if ($r->parsed->wantsHelp) {
     command::CLIContext $out = .from($r->parsed, $app, .stdout);
-    $out->write(command::renderHelp($app, $r->parsed, $out));
+    $out->print(command::renderHelp($app, $r->parsed, $out));
     env::exit(0);
 }
 ```

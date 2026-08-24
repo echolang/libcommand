@@ -11,10 +11,10 @@ test spinner_noninteractive_succeed_is_a_line
     $s->start('fetching');
     $s->succeed('vendored');
 
-    string $got = $s->line->ctx->captured;
-    assert(!$got->contains("\r"), 'no CR');
-    assert($got->contains('vendored'), 'final');
-    assert(!$got->contains('fetching'), 'start was silent');
+    assert($s->line->ctx->vt == '', 'no CR');
+    $got = $s->line->ctx->page;
+    assert(blockHas($got, 'vendored'), 'final');
+    assert(!blockHas($got, 'fetching'), 'start was silent');
 }
 
 test spinner_noninteractive_fail
@@ -23,7 +23,7 @@ test spinner_noninteractive_fail
     $s->start('fetching');
     $s->fail('offline');
 
-    assert($s->line->ctx->captured->contains('offline'), 'final');
+    assert(blockHas($s->line->ctx->page, 'offline'), 'final');
 }
 
 test spinner_interactive_start_paints
@@ -32,7 +32,7 @@ test spinner_interactive_start_paints
     element::Spinner $s = command::CLIContext::buffer($caps)->create<element::Spinner>();
     $s->start('working');
 
-    assert($s->line->ctx->captured->contains('working'), 'first glyph is not delayed');
+    assert($s->line->ctx->vt->contains('working'), 'first glyph is not delayed');
     $s->succeed('done');
 }
 
@@ -44,8 +44,8 @@ test spinner_interactive_paints_then_commits
     thread::sleep(200);
     $s->succeed('done');
 
-    string $got = $s->line->ctx->captured;
-    assert($got->contains("\r\x1b[K"), 'rewrote');
+    string $got = $s->line->ctx->vt;
+    assert($got->contains(command::CSI_ERASE_LINE), 'rewrote');
     assert($got->contains('done'), 'final');
 }
 

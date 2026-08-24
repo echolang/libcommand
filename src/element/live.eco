@@ -4,7 +4,8 @@
  * CR+EL dialect.
  *
  * Vocabulary is carriage return and erase-to-end-of-line. Never cursor-up.
- * Bytes go through the context, so a buffer-mode run is one transcript.
+ * Interactive paint is raw VT (`CLIContext.vt`). A finished row on a pipe
+ * is `line`, and lands on `CLIContext.page`.
  */
 
 namespace command::element;
@@ -44,14 +45,12 @@ public class LiveLine
         if ($this->ctx->caps->interactive) {
             string $seq = command::CSI_ERASE_LINE;
             $seq->append($text);
-            $seq->append(std::io::NEWLINE);
+            $seq->push(command::CH_LF);
             $this->ctx->write($seq);
             return;
         }
 
-        string $line = $text;
-        $line->append(std::io::NEWLINE);
-        $this->ctx->write($line);
+        $this->ctx->line($text);
     }
 
     public function erase() : void

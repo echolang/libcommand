@@ -49,37 +49,43 @@ public class LiveRegion
         return $this->ctx->caps->interactive && stdinIsTty();
     }
 
-    public function paint(const string& $text) : void
+    public function paint(const command::Block& $block) : void
     {
-        usize $n = trimmedLen($text);
-        int32 $rows = frameRows($text, $n);
+        int32 $n = command::i32Of($block->rows->count());
 
         if (!$this->ctx->caps->interactive) {
-            $this->height = $rows;
+            $this->height = $n;
             return;
         }
 
         string $seq = $this->hide();
         $seq->append($this->rewind());
-        $seq->append($text->sub(0, $n));
+
+        foreach ($block->rows as $i => $row) {
+            if ($i > 0) {
+                $seq->push(command::CH_LF);
+            }
+
+            $seq->append($row);
+        }
+
         $this->ctx->write($seq);
-        $this->height = $rows;
+        $this->height = $n;
     }
 
-    public function commit(const string& $text) : void
+    public function commit(const command::Block& $block) : void
     {
         if ($this->ctx->caps->interactive) {
-            $this->paint($text);
-            string $tail = std::io::NEWLINE;
+            $this->paint($block);
+            string $tail = '';
+            $tail->push(command::CH_LF);
             $tail->append($this->show());
             $this->ctx->write($tail);
             $this->height = 0;
             return;
         }
 
-        string $out = $text->sub(0, trimmedLen($text));
-        $out->append(std::io::NEWLINE);
-        $this->ctx->write($out);
+        $this->ctx->print($block);
         $this->height = 0;
     }
 
@@ -151,59 +157,4 @@ public class LiveRegion
 
         return command::CURSOR_SHOW;
     }
-}
-
-/**
- * How much of `$s` is frame, with any trailing newlines cut off.
- *
- * A length rather than a trimmed copy: a repaint runs this on the whole frame
- * on every keystroke, and in the common case - `stepFrame` never ends in a
- * newline - the copy would be the entire frame, byte for byte, for nothing.
- */
-function trimmedLen(const string& $s) : usize
-{
-    usize $n = $s->size();
-
-    while ($n > 0) {
-        uint8 $b = $s->byte($n - 1);
-
-        if ($b != command::CH_LF && $b != command::CH_CR) {
-            break;
-        }
-
-        $n = $n - 1;
-    }
-
-    return $n;
-}
-
-function frameRows(const string& $frame) : int32
-{
-    return frameRows($frame, $frame->size());
-}
-
-function frameRows(const string& $frame, usize $end) : int32
-{
-    usize $limit = $end;
-
-    if ($limit > $frame->size()) {
-        $limit = $frame->size();
-    }
-
-    if ($limit == 0) {
-        return 0;
-    }
-
-    int32 $rows = 1;
-    usize $i = 0;
-
-    while ($i < $limit) {
-        if ($frame->byte($i) == command::CH_LF) {
-            $rows = $rows + 1;
-        }
-
-        $i = $i + 1;
-    }
-
-    return $rows;
 }

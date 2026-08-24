@@ -158,15 +158,13 @@ function drawGlyph(const Select& $q, const command::PromptTheme& $theme, int32 $
     return $theme->checkOff;
 }
 
-function drawNumbered(const Select& $q) : string
+function drawNumbered(const Select& $q) : command::Block
 {
     array<string> $rows = array<string>();
-    usize $i = 0;
 
-    while ($i < $q->items->count()) {
+    foreach ($q->items as $i => $item) {
         int32 $n = command::i32Of($i) + 1;
-        $rows[] = "{$n}) {$q->items[$i]}";
-        $i = $i + 1;
+        $rows[] = "{$n}) {$item}";
     }
 
     return frameRowsOf($q->channel(), $q->title, $rows, .active);

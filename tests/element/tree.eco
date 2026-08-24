@@ -13,13 +13,13 @@ test tree_ascii_nested
     $t->root->children[] = $cli;
     $t->root->children[] = element::Node('widgets');
 
-    string $page = $t->render();
+    $page = $t->render();
 
-    assert($page->contains('libcommand'), 'root');
-    assert($page->contains('|- cli'), 'mid');
-    assert($page->contains('`- widgets'), 'last');
-    assert($page->contains('| |- parse'), 'nested');
-    assert($page->contains('| `- help'), 'nested last');
+    assert(blockHas($page, 'libcommand'), 'root');
+    assert(blockHas($page, '|- cli'), 'mid');
+    assert(blockHas($page, '`- widgets'), 'last');
+    assert(blockHas($page, '| |- parse'), 'nested');
+    assert(blockHas($page, '| `- help'), 'nested last');
 }
 
 test tree_unicode_connectors
@@ -31,10 +31,10 @@ test tree_unicode_connectors
     $t->root->children[] = element::Node('a');
     $t->root->children[] = element::Node('b');
 
-    string $page = $t->render();
+    $page = $t->render();
 
-    assert($page->contains('├─ a'), 'mid');
-    assert($page->contains('└─ b'), 'last');
+    assert(blockHas($page, '├─ a'), 'mid');
+    assert(blockHas($page, '└─ b'), 'last');
 }
 
 test tree_display_captures
@@ -44,14 +44,13 @@ test tree_display_captures
     $t->root->children[] = element::Node('cli');
     $t->display();
 
-    string $page = $t->render();
+    $page = $t->render();
     assert($t->captured == $page, 'captured matches render');
-    assert($t->captured->contains('libcommand'), 'root');
-    assert($t->captured->contains('`- cli'), 'child');
-    assert($ctx->captured->empty(), 'buffer capture is on the widget');
+    assert(blockHas($t->captured, 'libcommand'), 'root');
+    assert(blockHas($t->captured, '`- cli'), 'child');
+    assert($ctx->vt->empty(), 'buffer capture is on the widget');
+    assert($ctx->page->rows->count() == 0, 'buffer capture is on the widget');
 
     $t->display();
-    string $twice = $page;
-    $twice->append($page);
-    assert($t->captured == $twice, 'second display appends');
+    assert($t->captured->rows->count() == $page->rows->count() * 2, 'second display appends');
 }

@@ -65,7 +65,7 @@ public class Confirm : Step
         return askLineConfirm($this);
     }
 
-    public function frame() : string
+    public function frame() : command::Block
     {
         return stepFrame($this->channel(), $this, StepState::active);
     }
@@ -233,7 +233,7 @@ function askLiveConfirm(Confirm $c) : bool
 function askLineConfirm(Confirm $c) : bool
 {
     string $fallback = confirmWord($c);
-    $c->region->commit($c->channel()->askRow("{$c->title} [{$fallback}]"));
+    $c->region->commit(command::Block($c->channel()->askRow("{$c->title} [{$fallback}]")));
 
     string? $line = std::io::readline();
     string $text = '';

@@ -14,14 +14,14 @@ test table_ascii_has_header_and_row
     $r[] = 'ready';
     $t->row($r);
 
-    string $page = command::stripSgr($t->render());
+    $page = $t->render();
 
-    assert($page->contains('Feature'), 'header');
-    assert($page->contains('Status'), 'header 2');
-    assert($page->contains('Markup'), 'cell');
-    assert($page->contains('ready'), 'cell 2');
-    assert($page->contains('+'), 'ascii corner');
-    assert($page->contains('|'), 'ascii bar');
+    assert(blockHas($page, 'Feature'), 'header');
+    assert(blockHas($page, 'Status'), 'header 2');
+    assert(blockHas($page, 'Markup'), 'cell');
+    assert(blockHas($page, 'ready'), 'cell 2');
+    assert(blockHas($page, '+'), 'ascii corner');
+    assert(blockHas($page, '|'), 'ascii bar');
 }
 
 test table_unicode_uses_box
@@ -35,10 +35,10 @@ test table_unicode_uses_box
     $r[] = 'x';
     $t->row($r);
 
-    string $page = $t->render();
+    $page = $t->render();
 
-    assert($page->contains('┌'), 'tl');
-    assert($page->contains('│'), 'v');
+    assert(blockHas($page, '┌'), 'tl');
+    assert(blockHas($page, '│'), 'v');
 }
 
 test table_display_captures
@@ -50,12 +50,11 @@ test table_display_captures
     $t->row(['Markup', 'ready']);
     $t->display();
 
-    string $page = $t->render();
+    $page = $t->render();
     assert($t->captured == $page, 'captured matches render');
-    assert($ctx->captured->empty(), 'buffer capture is on the widget');
+    assert($ctx->vt->empty(), 'buffer capture is on the widget');
+    assert($ctx->page->rows->count() == 0, 'buffer capture is on the widget');
 
     $t->display();
-    string $twice = $page;
-    $twice->append($page);
-    assert($t->captured == $twice, 'second display appends');
+    assert($t->captured->rows->count() == $page->rows->count() * 2, 'second display appends');
 }

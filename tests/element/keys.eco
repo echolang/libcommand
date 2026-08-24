@@ -6,8 +6,8 @@ use command::element;
 
 test key_enter_and_space
 {
-    assert(element::decodeKey("\n") == element::Key::enter, 'lf');
-    assert(element::decodeKey("\r") == element::Key::enter, 'cr');
+    assert(element::decodeKey(keyCh(command::CH_LF)) == element::Key::enter, 'lf');
+    assert(element::decodeKey(keyCh(command::CH_CR)) == element::Key::enter, 'cr');
     assert(element::decodeKey(' ') == element::Key::space, 'space');
 }
 

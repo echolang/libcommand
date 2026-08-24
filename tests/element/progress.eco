@@ -12,13 +12,13 @@ test progress_noninteractive_ticks_are_silent
     $p->advance(1, 'a.eco');
     $p->finish();
 
-    string $got = $p->line->ctx->captured;
-    assert(!$got->contains("\r"), 'no CR');
-    assert($got->contains('*'), 'done glyph');
-    assert($got->contains('download'), 'label');
-    assert($got->contains('----------------------------------------'), 'full fill');
-    assert($got->contains('100%'), 'full percent');
-    assert($got->contains("\n"), 'a line');
+    assert($p->line->ctx->vt == '', 'no CR');
+    $got = $p->line->ctx->page;
+    assert(blockHas($got, '*'), 'done glyph');
+    assert(blockHas($got, 'download'), 'label');
+    assert(blockHas($got, '----------------------------------------'), 'full fill');
+    assert(blockHas($got, '100%'), 'full percent');
+    assert($p->line->ctx->page->rows->count() == 1, 'a line');
 }
 
 test progress_fail_keeps_the_fraction
@@ -28,13 +28,13 @@ test progress_fail_keeps_the_fraction
     $p->set(5, 'a.eco');
     $p->fail();
 
-    string $got = $p->line->ctx->captured;
-    assert($got->contains('x'), 'failed glyph');
-    assert($got->contains('--------------------'), 'half fill');
-    assert(!$got->contains('---------------------'), 'not more than half');
-    assert($got->contains('50%'), 'percent');
-    assert($got->contains('a.eco'), 'detail');
-    assert(!$got->contains('100%'), 'not finished');
+    $got = $p->line->ctx->page;
+    assert(blockHas($got, 'x'), 'failed glyph');
+    assert(blockHas($got, '--------------------'), 'half fill');
+    assert(!blockHas($got, '---------------------'), 'not more than half');
+    assert(blockHas($got, '50%'), 'percent');
+    assert(blockHas($got, 'a.eco'), 'detail');
+    assert(!blockHas($got, '100%'), 'not finished');
 }
 
 test progress_over_advance_clamps
@@ -44,9 +44,9 @@ test progress_over_advance_clamps
     $p->advance(100, '');
     $p->fail();
 
-    string $got = $p->line->ctx->captured;
-    assert($got->contains('----------------------------------------'), 'full bar');
-    assert($got->contains('100%'), 'clamped');
+    $got = $p->line->ctx->page;
+    assert(blockHas($got, '----------------------------------------'), 'full bar');
+    assert(blockHas($got, '100%'), 'clamped');
 }
 
 test progress_start_is_silent_on_a_pipe
@@ -55,7 +55,8 @@ test progress_start_is_silent_on_a_pipe
     $p->start('download', 10);
     $p->set(3, 'x');
 
-    assert($p->line->ctx->captured == '', 'no rewrite in a log');
+    assert($p->line->ctx->vt == '', 'no rewrite in a log');
+    assert($p->line->ctx->page->rows->count() == 0, 'no rewrite in a log');
 }
 
 test progress_interactive_paints_then_commits
@@ -67,11 +68,11 @@ test progress_interactive_paints_then_commits
     $p->set(4, 'a.eco');
     $p->finish();
 
-    string $got = $p->line->ctx->captured;
-    assert($got->contains("\r\x1b[K"), 'rewrote');
+    string $got = $p->line->ctx->vt;
+    assert($got->contains(command::CSI_ERASE_LINE), 'rewrote');
     assert($got->contains('*'), 'done glyph');
     assert($got->contains('100%'), 'final');
-    assert($got->ends("\n"), 'newline');
+    assert($got->ends(keyCh(command::CH_LF)), 'newline');
 }
 
 test progress_colour_splits_fill_and_rest
@@ -82,7 +83,7 @@ test progress_colour_splits_fill_and_rest
     $p->set(5, 'a.eco');
     $p->fail();
 
-    string $got = $p->line->ctx->captured;
+    string $got = $p->line->ctx->vt;
     assert($got->contains("\x1b[33m--------------------\x1b[39m"), 'yellow fill');
     assert($got->contains("\x1b[31m--------------------\x1b[39m"), 'red fill');
     assert($got->contains("\x1b[90m--------------------\x1b[39m"), 'grey rest');
@@ -95,9 +96,9 @@ test progress_large_total_does_not_wrap
     $p->set(50000000, '');
     $p->fail();
 
-    string $got = $p->line->ctx->captured;
-    assert($got->contains('50%'), 'half of a byte-count total');
-    assert(!$got->contains('-%'), 'not a wrapped percent');
+    $got = $p->line->ctx->page;
+    assert(blockHas($got, '50%'), 'half of a byte-count total');
+    assert(!blockHas($got, '-%'), 'not a wrapped percent');
 }
 
 test progress_unicode_finish_uses_the_check
@@ -107,8 +108,8 @@ test progress_unicode_finish_uses_the_check
     $p->start('download', 10);
     $p->finish();
 
-    string $got = $p->line->ctx->captured;
-    assert($got->contains('✔'), 'check');
-    assert($got->contains('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'), 'full track');
-    assert($got->contains('100%'), 'full percent');
+    $got = $p->line->ctx->page;
+    assert(blockHas($got, '✔'), 'check');
+    assert(blockHas($got, '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'), 'full track');
+    assert(blockHas($got, '100%'), 'full percent');
 }

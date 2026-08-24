@@ -124,11 +124,11 @@ test prompt_draws_a_caret_where_the_cursor_is
     $p->type('ab');
     $p->feed(element::Key::left);
 
-    string $frame = $p->frame();
+    $frame = $p->frame();
     string $want = command::styled('b', command::SGR_REVERSE, true);
 
-    assert($frame->contains($want), 'the caret inverts the scalar it sits on');
-    assert(command::stripSgr($frame)->contains('ab'), 'and costs no column');
+    assert(blockHas($frame, $want), 'the caret inverts the scalar it sits on');
+    assert(blockHas($frame, 'ab'), 'and costs no column');
 }
 
 test prompt_caret_parks_past_the_end
@@ -139,7 +139,7 @@ test prompt_caret_parks_past_the_end
 
     string $want = command::styled(' ', command::SGR_REVERSE, true);
 
-    assert($p->frame()->contains($want), 'a cell of its own at the end');
+    assert(blockHas($p->frame(), $want), 'a cell of its own at the end');
 }
 
 test prompt_shows_a_placeholder_while_empty
@@ -148,12 +148,12 @@ test prompt_shows_a_placeholder_while_empty
     element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
     $p->hint('./my-app');
 
-    assert(command::stripSgr($p->frame())->contains('./my-app'), 'the hint is drawn');
-    assert($p->frame()->contains(command::SGR_DIM), 'and dimmed');
+    assert(blockHas($p->frame(), './my-app'), 'the hint is drawn');
+    assert(blockHas($p->frame(), command::SGR_DIM), 'and dimmed');
 
     $p->type('x');
 
-    assert(!command::stripSgr($p->frame())->contains('./my-app'), 'and gone once typing starts');
+    assert(!blockHas($p->frame(), './my-app'), 'and gone once typing starts');
 }
 
 test prompt_placeholder_is_never_the_answer
@@ -204,12 +204,10 @@ test prompt_never_reaches_the_last_column
     element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
     $p->type('abcdefghijklmnopqrstuvwxyz0123456789');
 
-    array<string> $rows = str::split($p->frame(), "\n")->owned();
-    usize $i = 0;
+    $frame = $p->frame();
 
-    while ($i < $rows->count()) {
-        assert(command::textWidth($rows[$i]) < 20, 'a row that fills the width would wrap');
-        $i = $i + 1;
+    foreach ($frame->rows as $row) {
+        assert(command::textWidth($row) < 20, 'a row that fills the width would wrap');
     }
 }
 
@@ -219,12 +217,12 @@ test prompt_window_follows_the_caret
     element::Text $p = command::CLIContext::buffer($caps)->create<element::Text>('Where?');
     $p->type('abcdefghijklmnopqrstuvwxyz');
 
-    assert($p->frame()->contains('z'), 'the caret end is visible');
-    assert(!$p->frame()->contains('abc'), 'the far end has scrolled off');
+    assert(blockHas($p->frame(), 'z'), 'the caret end is visible');
+    assert(!blockHas($p->frame(), 'abc'), 'the far end has scrolled off');
 
     $p->feed(element::Key::home);
 
-    assert($p->frame()->contains('abc'), 'and comes back');
+    assert(blockHas($p->frame(), 'abc'), 'and comes back');
     assert($p->scroll == 0, 'the window is back at the front');
 }
 
@@ -248,7 +246,7 @@ test prompt_joins_a_run_opened_after_create
     $ctx->beginStepper('x');
     $p->type('x');
 
-    assert($p->frame()->starts("◆  Where?"), 'the live channel, not a snapshot');
+    assert($p->frame()->rows[0]->starts("◆  Where?"), 'the live channel, not a snapshot');
 }
 
 test prompt_in_a_session_hangs_off_the_bar
@@ -259,7 +257,8 @@ test prompt_in_a_session_hangs_off_the_bar
     element::Text $p = $ctx->create<element::Text>('Where?');
     $p->type('x');
 
-    assert($p->frame()->starts("◆  Where?\n│  "), 'a step and a bar row');
+    assert($p->frame()->rows[0]->starts('◆  Where?'), 'a step and a bar row');
+    assert($p->frame()->rows[1]->starts('│  '), 'a step and a bar row');
 }
 
 test prompt_on_its_own_keeps_the_old_indent
@@ -267,7 +266,8 @@ test prompt_on_its_own_keeps_the_old_indent
     element::Text $p = promptCtx()->create<element::Text>('Where?');
     $p->type('x');
 
-    assert($p->frame()->starts("  Where?\n  "), 'two spaces, no bar');
+    assert($p->frame()->rows[0]->starts('  Where?'), 'two spaces, no bar');
+    assert($p->frame()->rows[1]->starts('  '), 'two spaces, no bar');
 }
 
 test prompt_summary_is_the_answer_under_the_title
@@ -279,7 +279,7 @@ test prompt_summary_is_the_answer_under_the_title
     $p->type('./my-app');
     $p->feed(element::Key::enter);
 
-    assert($p->region->ctx->captured->contains("◇  Where?\n│  ./my-app"), 'title, then the answer');
+    assert($p->region->ctx->vt->contains("◇  Where?\n│  ./my-app"), 'title, then the answer');
 }
 
 test prompt_tab_is_not_inserted

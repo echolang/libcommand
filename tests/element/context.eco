@@ -34,7 +34,7 @@ test context_create_table
     $row[] = 'x';
     $t->row($row);
 
-    assert($t->render()->contains('A'), 'renders from stored caps');
+    assert(blockHas($t->render(), 'A'), 'renders from stored caps');
 }
 
 test context_create_joins_the_run
@@ -46,7 +46,8 @@ test context_create_joins_the_run
     element::Spinner $spin = $ctx->create<element::Spinner>();
 
     assert($spin->channel()->gutter, 'the run stepper has a bar');
-    assert($ctx->captured->starts("┌  create-app\n"), 'beginStepper opened the run');
+    assert($ctx->page->rows->count() == 1, 'beginStepper opened the run');
+    assert($ctx->page->rows[0] == '┌  create-app', 'beginStepper opened the run');
 }
 
 test context_create_select_is_the_object
@@ -73,7 +74,7 @@ test table_display_writes_through_the_context
     $t->row($row);
     $t->display();
 
-    assert($t->captured->contains('A'), 'display captured on the widget');
+    assert(blockHas($t->captured, 'A'), 'display captured on the widget');
 }
 
 test table_columns_adds_each_header
@@ -84,8 +85,8 @@ test table_columns_adds_each_header
     $heads[] = 'Name';
     $heads[] = 'Status';
     $t->columns($heads);
-    string $got = $t->render();
+    $got = $t->render();
 
-    assert($got->contains('Name'), 'first header');
-    assert($got->contains('Status'), 'second header');
+    assert(blockHas($got, 'Name'), 'first header');
+    assert(blockHas($got, 'Status'), 'second header');
 }

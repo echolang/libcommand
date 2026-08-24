@@ -306,7 +306,7 @@ public class Text : Step
         return askLineText($this);
     }
 
-    public function frame() : string
+    public function frame() : command::Block
     {
         return stepFrame($this->channel(), $this, StepState::active);
     }
@@ -387,7 +387,7 @@ function askLiveText(Text $p) : string
 
 function askLineText(Text $p) : string
 {
-    $p->region->commit(plainQuestion($p));
+    $p->region->commit(command::Block(plainQuestion($p)));
     string? $line = std::io::readline();
     string $text = '';
 

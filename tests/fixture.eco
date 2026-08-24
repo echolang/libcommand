@@ -36,11 +36,9 @@ function argv(const array<string>& $rest) : array<string>
 {
     array<string> $a = array<string>();
     $a[] = 'greet';
-    usize $i = 0;
 
-    while ($i < $rest->count()) {
-        $a[] = $rest[$i];
-        $i = $i + 1;
+    foreach ($rest as $arg) {
+        $a[] = $arg;
     }
 
     return $a;
@@ -86,4 +84,32 @@ function promptCaps() : command::TerminalCapabilities
 function promptCtx() : command::CLIContext
 {
     return .buffer(promptCaps());
+}
+
+function pic(const array<string>& $rows) : command::Block
+{
+    return command::Block($rows);
+}
+
+function blockHas(const command::Block& $b, const string& $needle) : bool
+{
+    foreach ($b->rows as $row) {
+        if ($row->contains($needle)) {
+            return true;
+        }
+
+        if (command::stripSgr($row)->contains($needle)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function keyCh(uint8 $b) : string
+{
+    string $s = '';
+    $s->push($b);
+
+    return $s;
 }

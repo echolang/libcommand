@@ -14,7 +14,7 @@ thread::sleep(250);
 $s->update('unpacking');
 thread::sleep(250);
 $s->suspend();
-$ctx->println('mirror is slow, using the fallback');
+$ctx->line('mirror is slow, using the fallback');
 $s->succeed('vendored 4 packages');
 
 int32 $n = element::spin($ctx, 'counting', function() : int32 {

@@ -57,7 +57,7 @@ test stepper_opens_and_closes
     element::Stepper $s = element::Stepper(true, command::TerminalCapabilities(false, true, 80, true));
 
     assert($s->open('create-app') == '┌  create-app', 'intro');
-    assert($s->close('done') == "│\n└  done", 'a bar, then the end');
+    assert($s->close('done') == '└  done', 'the end');
 }
 
 test stepper_state_symbols
@@ -113,12 +113,12 @@ test stepper_only_a_live_frame_is_capped
     array<string> $rows = array<string>();
     $rows[] = 'value';
 
-    string $live = element::frameRowsOf($s, 'Where?', $rows, element::StepState::active);
-    string $settled = element::summaryRowsOf($s, 'Where?', $rows);
+    $live = element::frameRowsOf($s, 'Where?', $rows, element::StepState::active);
+    $settled = element::summaryRowsOf($s, 'Where?', $rows);
 
-    assert($live == "◆  Where?\n│  value", 'frameRowsOf leaves the cap to stepFrame');
-    assert($settled == "◇  Where?\n│  value", 'a summary is never capped');
-    assert($settled->starts('◇'), 'and keeps its own symbol');
+    assert($live == pic(['◆  Where?', '│  value']), 'frameRowsOf leaves the cap to stepFrame');
+    assert($settled == pic(['◇  Where?', '│  value']), 'a summary is never capped');
+    assert($settled->rows[0]->starts('◇'), 'and keeps its own symbol');
 }
 
 test stepper_room_reserves_the_last_column

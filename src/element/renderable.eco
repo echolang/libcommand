@@ -7,14 +7,14 @@ namespace command::element;
 
 function writeOrCapture(
     command::CLIContext $ctx,
-    string& $captured,
-    const string& $page
+    command::Block& $captured,
+    const command::Block& $page
 ) : void
 {
     if ($ctx->toStream) {
-        $ctx->out->write($page);
+        $ctx->print($page);
         return;
     }
 
-    $captured->append($page);
+    $captured->extend($page);
 }

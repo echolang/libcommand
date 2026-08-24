@@ -10,7 +10,7 @@ test confirm_starts_on_yes
     element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
 
     assert($c->result(), 'yes by default');
-    assert($c->frame()->contains('● Yes / ○ No'), 'yes is filled');
+    assert(blockHas($c->frame(), '● Yes / ○ No'), 'yes is filled');
 }
 
 test confirm_can_start_on_no
@@ -26,7 +26,7 @@ test confirm_arrows_toggle
     $c->feed(element::Key::left);
 
     assert(!$c->result(), 'left flipped it');
-    assert($c->frame()->contains('○ Yes / ● No'), 'no is filled');
+    assert(blockHas($c->frame(), '○ Yes / ● No'), 'no is filled');
 
     $c->feed(element::Key::right);
 
@@ -59,7 +59,7 @@ test confirm_enter_submits
     element::Confirm $c = promptCtx()->create<element::Confirm>('Continue?');
 
     assert($c->feed(element::Key::enter), 'enter is always an answer');
-    assert($c->region->ctx->captured->contains('Continue?  Yes'), 'the answer is committed');
+    assert($c->region->ctx->vt->contains('Continue?  Yes'), 'the answer is committed');
 }
 
 test confirm_words_can_be_renamed
@@ -67,7 +67,7 @@ test confirm_words_can_be_renamed
     element::Confirm $c = promptCtx()->create<element::Confirm>('Overwrite?');
     $c->words('Replace', 'Keep');
 
-    assert($c->frame()->contains('● Replace / ○ Keep'), 'the caller names them');
+    assert(blockHas($c->frame(), '● Replace / ○ Keep'), 'the caller names them');
 }
 
 test confirm_in_a_session_hangs_off_the_bar
@@ -76,7 +76,7 @@ test confirm_in_a_session_hangs_off_the_bar
     $ctx->beginStepper('x');
     element::Confirm $c = $ctx->create<element::Confirm>('Continue?');
 
-    assert($c->frame() == "◆  Continue?\n│  ● Yes / ○ No\n└", 'a step, a bar row, and the cap');
+    assert($c->frame() == pic(['◆  Continue?', '│  ● Yes / ○ No', '└']), 'a step, a bar row, and the cap');
 }
 
 test confirm_in_a_session_dims_the_other_answer
@@ -85,10 +85,10 @@ test confirm_in_a_session_dims_the_other_answer
     command::CLIContext $ctx = .buffer($caps);
     $ctx->beginStepper('x');
     element::Confirm $c = $ctx->create<element::Confirm>('Continue?');
-    string $got = $c->frame();
+    $got = $c->frame();
 
-    assert($got->contains(command::SGR_DIM), 'the answer not chosen is dimmed');
-    assert(!$got->contains(command::SGR_INFO), 'and nothing shouts');
+    assert(blockHas($got, command::SGR_DIM), 'the answer not chosen is dimmed');
+    assert(!blockHas($got, command::SGR_INFO), 'and nothing shouts');
 }
 
 test confirm_summary_is_two_rows_in_a_session
@@ -99,5 +99,5 @@ test confirm_summary_is_two_rows_in_a_session
     $c->feed(element::Key::left);
     $c->feed(element::Key::enter);
 
-    assert($c->region->ctx->captured->contains("◇  Continue?\n│  No"), 'title, then the answer');
+    assert($c->region->ctx->vt->contains("◇  Continue?\n│  No"), 'title, then the answer');
 }

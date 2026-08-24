@@ -1,0 +1,54 @@
+/**
+ * A picture: rows of text, no CR or LF in any row.
+ *
+ * Line endings belong to the writers (`CLIContext.line` / `print`, and the
+ * live tty serializer). This type does not join.
+ */
+
+namespace command;
+
+public struct Block
+{
+    public array<string> $rows;
+
+    public constructor()
+    {
+        $this->rows = array<string>();
+    }
+
+    public constructor(const string& $row)
+    {
+        $this->rows = array<string>();
+        $this->rows[] = $row;
+    }
+
+    public constructor(const array<string>& $rows)
+    {
+        $this->rows = $rows;
+    }
+
+    public function push(const string& $row) : void
+    {
+        $this->rows[] = $row;
+    }
+
+    public function extend(const Block& $other) : void
+    {
+        $this->rows->extend($other->rows);
+    }
+}
+
+operator (const Block& $l) == (const Block& $r) : bool
+{
+    if ($l->rows->count() != $r->rows->count()) {
+        return false;
+    }
+
+    foreach ($l->rows as $i => $row) {
+        if ($row != $r->rows[$i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
