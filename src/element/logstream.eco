@@ -1,0 +1,538 @@
+/**
+ * A window onto a stream of output, the way `docker build` shows a step:
+ * only the last few rows, scrolling as new ones arrive.
+ *
+ *   $log = $ctx->create<LogStream>(6);
+ *   $bar = $log->progress();
+ *   $bar->start('compile', 42);
+ *   $log->push('cc -O2 -c src/model.c');
+ *   $bar->advance(1, 'model.o');
+ *   $bar->finish();
+ *
+ * The window owns the whole frame. Dock a Spinner or Progress into a slot
+ * of it (spinner above, bar below) instead of letting them rewrite their
+ * own line. Two live things on one stream erase each other. This is how
+ * they don't.
+ *
+ * Success collapses the window to the docked row. Failure keeps the tail
+ * on screen, which is what you want to read when a build breaks. On a pipe
+ * the rows stream through as plain lines and nothing is rewritten.
+ */
+
+namespace command::element;
+
+use std::thread;
+use std::time;
+
+/**
+ * Where the docked widget sits in the frame. None means the window is on
+ * its own.
+ */
+enum Dock
+{
+    case none;
+    case above;
+    case below;
+}
+
+#[atomic]
+public class LogStream : LiveTicks, LiveRow
+{
+    public command::CLIContext $ctx;
+
+    /**
+     * How many rows the window shows. Older ones scroll out of sight.
+     */
+    public int32 $lines;
+
+    /**
+     * A successful close takes the window off the screen. A failure keeps
+     * it either way, so you can still read what broke.
+     */
+    public bool $collapse;
+
+    /**
+     * Drop SGR from pushed rows. Colour from a child process is sized for a
+     * terminal it no longer owns, and the window paints its rows muted.
+     */
+    public bool $strip;
+
+    /**
+     * How long, in milliseconds, two pushes may be apart and still collapse
+     * into one paint. A burst closer than this marks the frame dirty. The
+     * tick runs at this same period and draws it once. Zero paints every
+     * push and starts no tick.
+     */
+    public int32 $interval;
+
+    public LiveRegion $region;
+    public Ticker $ticker;
+    public command::LogTheme $theme;
+
+    array<string> $tail;
+    string $slot;
+    Dock $dock;
+    bool $open;
+    bool $dirty;
+    bool $spaced;
+    time::instant? $painted;
+
+    constructor(command::CLIContext $ctx, int32 $lines)
+    {
+        $this->ctx = $ctx;
+        $this->lines = $lines;
+        $this->collapse = true;
+        $this->strip = true;
+        $this->interval = 33;
+        $this->region = LiveRegion($ctx);
+        $this->ticker = Ticker();
+        $this->theme = command::logTheme($ctx->caps->unicode);
+        $this->tail = array<string>();
+        $this->slot = '';
+        $this->dock = Dock::none;
+        $this->open = true;
+        $this->dirty = false;
+        $this->spaced = false;
+        $this->painted = null;
+
+        if ($lines < 1) {
+            die('command::element::LogStream: a window needs at least one row');
+        }
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    /**
+     * A Progress whose row sits below the window. Finish or fail closes the
+     * log too.
+     */
+    public function progress() : Progress
+    {
+        Progress $p = Progress($this->ctx);
+        $this->bind(.below);
+        $p->line = $this;
+
+        return $p;
+    }
+
+    /**
+     * A Spinner whose row sits above the window. That's the docker look.
+     * Succeed or fail closes the log too.
+     */
+    public function spinner() : Spinner
+    {
+        Spinner $s = Spinner($this->ctx);
+        $this->bind(.above);
+        $s->line = $this;
+
+        return $s;
+    }
+
+    /**
+     * Stream `$text` into the window. Newlines split rows. A carriage return
+     * keeps only what follows it, which is how a child's own progress line
+     * works. Tabs become four spaces.
+     */
+    public function push(const string& $text) : void
+    {
+        array<string> $rows = $this->clean($text);
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if (!$this->ctx->caps->interactive || !$this->open) {
+            $this->space();
+            $this->ctx->print($this->railed($rows));
+            return;
+        }
+
+        $this->takeTail($rows);
+        $this->refresh();
+    }
+
+    /**
+     * A row that stays. It lands above the window and scrolls with the
+     * terminal, not with the window. A finished step, a warning, a cached
+     * layer.
+     */
+    public function print(const string& $text) : void
+    {
+        array<string> $rows = $this->clean($text);
+        Stepper $ch = $this->channel();
+        command::Block $out = command::Block();
+
+        foreach ($rows as $row) {
+            $out->push($ch->row($row));
+        }
+
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        bool $live = $this->ctx->caps->interactive && $this->open;
+        $this->space();
+
+        if ($live) {
+            $this->region->erase();
+        }
+
+        $this->ctx->print($out);
+
+        if ($live) {
+            $this->draw();
+        }
+    }
+
+    /**
+     * Done. The window collapses, or stays when `collapse` is off, docked
+     * row included if one is still on screen. A docked widget that settles
+     * later writes its row as a plain line.
+     */
+    public function close() : void
+    {
+        if (!$this->shut()) {
+            return;
+        }
+
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if (!$this->ctx->caps->interactive) {
+            return;
+        }
+
+        if (!$this->collapse) {
+            $this->region->commit($this->frame($this->slot));
+            return;
+        }
+
+        $this->region->erase();
+    }
+
+    public const function channel() : Stepper
+    {
+        return $this->ctx->channel();
+    }
+
+    public const function interactive() : bool
+    {
+        return $this->ctx->caps->interactive;
+    }
+
+    /**
+     * The docked widget's row changed. Empty takes it out of the frame.
+     * Drawn immediately: the widget is already the cadence. The coalescing
+     * tick is for pushes.
+     */
+    public function paint(const string& $text) : void
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        $this->put($text);
+    }
+
+    public function erase() : void
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        $this->put('');
+    }
+
+    public function gap() : void
+    {
+    }
+
+    /**
+     * The docked widget is finished. `$ok` collapses the window when
+     * `collapse` allows. A failure keeps the tail next to the final row.
+     */
+    public function settle(const string& $row, bool $ok) : void
+    {
+        if (!$this->shut()) {
+            $this->ctx->line($row);
+            return;
+        }
+
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+        $this->space();
+
+        if (!$this->ctx->caps->interactive) {
+            $this->ctx->line($row);
+            return;
+        }
+
+        if ($ok && $this->collapse) {
+            $this->region->commit(command::Block($row));
+            return;
+        }
+
+        $this->region->commit($this->frame($row));
+    }
+
+    function tickOnce() : void
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if (!$this->open || !$this->dirty) {
+            return;
+        }
+
+        $this->draw();
+    }
+
+    /**
+     * The window with the docked `$row` on its side. Empty leaves it out.
+     * The gate is held.
+     */
+    const function frame(const string& $row) : command::Block
+    {
+        command::Block $out = command::Block();
+
+        if (!$row->empty() && $this->dock == Dock::above) {
+            $out->push($row);
+        }
+
+        $out->extend($this->window());
+
+        if (!$row->empty() && $this->dock == Dock::below) {
+            $out->push($row);
+        }
+
+        return $out;
+    }
+
+    const function window() : command::Block
+    {
+        return command::Block($this->tail);
+    }
+
+    const function railed(const array<string>& $rows) : command::Block
+    {
+        Stepper $ch = $this->channel();
+        command::Block $out = command::Block();
+
+        foreach ($rows as $row) {
+            $out->push($this->railRow($ch, $row));
+        }
+
+        return $out;
+    }
+
+    /**
+     * One streamed row: rail, text, muted. The Stepper fits it so it can
+     * never wrap and throw the region's height off.
+     */
+    const function railRow(const Stepper& $ch, const string& $row) : string
+    {
+        string $body = command::styled("{$this->theme->rail} {$row}", command::SGR_MUTED, $this->ctx->caps->color);
+
+        return $ch->row($body);
+    }
+
+    /**
+     * Keep the last `$lines` of `$rows`, already railed. A batch that long
+     * replaces the tail. A shorter one appends and trims. The gate is held.
+     */
+    function takeTail(const array<string>& $rows) : void
+    {
+        Stepper $ch = $this->channel();
+        int32 $n = command::i32Of($rows->count());
+
+        if ($n >= $this->lines) {
+            array<string> $next = array<string>();
+            usize $i = $rows->count() - command::usizeOf($this->lines);
+
+            while ($i < $rows->count()) {
+                $next[] = $this->railRow($ch, $rows[$i]);
+                $i = $i + 1;
+            }
+
+            $this->tail = $next;
+            return;
+        }
+
+        foreach ($rows as $row) {
+            $this->tail[] = $this->railRow($ch, $row);
+        }
+
+        while (command::i32Of($this->tail->count()) > $this->lines) {
+            $this->tail->remove(0);
+        }
+    }
+
+    /**
+     * Paint now if the last paint is old enough, else leave it to the tick.
+     * Pushes go through here. A docked widget paints immediately instead.
+     * The gate is held.
+     */
+    function refresh() : void
+    {
+        $this->space();
+
+        if (!$this->due()) {
+            $this->dirty = true;
+            $this->ensureTicker();
+            return;
+        }
+
+        $this->draw();
+    }
+
+    function draw() : void
+    {
+        $this->region->paint($this->frame($this->slot));
+        $this->painted = time::instant::now();
+        $this->dirty = false;
+    }
+
+    const function due() : bool
+    {
+        if ($this->interval < 1) {
+            return true;
+        }
+
+        time::instant $last = guard $this->painted else {
+            return true;
+        }
+
+        return time::instant::now() - $last >= time::duration::millis($this->interval as int64);
+    }
+
+    /**
+     * Start the coalescing tick on the first deferred push. Interval 0
+     * paints every push, so it never starts. The gate is held. The tick
+     * only waits for it.
+     */
+    function ensureTicker() : void
+    {
+        if ($this->interval < 1) {
+            return;
+        }
+
+        if ($this->ticker->running->load()) {
+            return;
+        }
+
+        $this->ticker->start('command::element::LogStream', $this, $this->interval);
+    }
+
+    /**
+     * The session spacer, once, before the first row this log writes.
+     */
+    function space() : void
+    {
+        if ($this->spaced) {
+            return;
+        }
+
+        $this->spaced = true;
+        $this->ctx->gap();
+    }
+
+    /**
+     * Mark the log closed and stop the tick. False when it already was.
+     * The tick is joined without the gate held: its last pass may be
+     * waiting for it.
+     */
+    function shut() : bool
+    {
+        {
+            thread::locked<int32> $g = $this->ticker->gate->lock();
+
+            if (!$this->open) {
+                return false;
+            }
+
+            $this->open = false;
+        }
+
+        $this->ticker->halt();
+
+        return true;
+    }
+
+    function bind(Dock $dock) : void
+    {
+        thread::locked<int32> $g = $this->ticker->gate->lock();
+
+        if ($this->dock != Dock::none) {
+            die('command::element::LogStream: a widget is already docked');
+        }
+
+        $this->dock = $dock;
+    }
+
+    /**
+     * Drop `$row` into the slot and draw. The gate is held.
+     */
+    function put(const string& $row) : void
+    {
+        if (!$this->open || !$this->ctx->caps->interactive) {
+            return;
+        }
+
+        $this->slot = $row;
+        $this->space();
+        $this->draw();
+    }
+
+    /**
+     * Rows of `$text` ready for the window. Split on newlines, strip the
+     * trailing CR of a CRLF, then keep the tail of each remaining carriage
+     * return. Tabs expand. SGR goes if `strip` is on. A trailing newline
+     * does not make an empty row.
+     */
+    const function clean(const string& $text) : array<string>
+    {
+        array<string> $parts = command::linesOf($text);
+        array<string> $out = array<string>();
+
+        foreach ($parts as $i => $part) {
+            if ($i + 1 == $parts->count() && $part->empty() && $i > 0) {
+                break;
+            }
+
+            string $row = afterReturn($part);
+
+            if ($this->strip) {
+                $row = command::stripSgr($row);
+            }
+
+            $out[] = expandTabs($row);
+        }
+
+        return $out;
+    }
+}
+
+/**
+ * What a terminal would actually show of `$s`. One trailing CR is the
+ * leftover of a CRLF, so it goes first. Then everything after the last
+ * remaining carriage return, which is how `50%\r100%` becomes `100%`.
+ */
+function afterReturn(const string& $s) : string
+{
+    string $row = $s;
+
+    if ($row->size() > 0 && $row->byte($row->size() - 1) == command::CH_CR) {
+        $row = $row->sub(0, $row->size() - 1);
+    }
+
+    usize $from = 0;
+
+    for (usize $i = 0; $i < $row->size(); $i++) {
+        if ($row->byte($i) == command::CH_CR) {
+            $from = $i + 1;
+        }
+    }
+
+    if ($from == 0) {
+        return $row;
+    }
+
+    return $row->sub($from, $row->size() - $from);
+}
+
+function expandTabs(const string& $s) : string
+{
+    if ($s->find("\t") == $s->size()) {
+        return $s;
+    }
+
+    return str::join(str::split($s, "\t")->owned(), '    ');
+}

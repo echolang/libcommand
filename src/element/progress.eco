@@ -10,7 +10,7 @@ use std::thread;
 #[atomic]
 public class Progress : LiveTicks
 {
-    public LiveLine $line;
+    public LiveRow $line;
     public Ticker $ticker;
     public string $label;
     public string $detail;
@@ -54,7 +54,7 @@ public class Progress : LiveTicks
             die('command::element::Progress: already running');
         }
 
-        $this->ctx->gap();
+        $this->line->gap();
         $this->line->paint($this->resetRow($label, $total));
 
         if (!$this->line->interactive()) {
@@ -175,7 +175,7 @@ public class Progress : LiveTicks
 
     function commitFinal(bool $ok) : void
     {
-        $this->line->commit($this->drawRow($this->spin->outcome($ok), command::outcomeSgr($ok)));
+        $this->line->settle($this->drawRow($this->spin->outcome($ok), command::outcomeSgr($ok)), $ok);
     }
 
     /**
@@ -185,7 +185,7 @@ public class Progress : LiveTicks
      */
     const function drawRow(const string& $glyph, const string& $sgr) : string
     {
-        bool $color = $this->line->ctx->caps->color;
+        bool $color = $this->ctx->caps->color;
         int32 $barWidth = barWidth(
             $this->channel()->glyphRoom($glyph),
             $this->label,

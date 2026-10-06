@@ -203,6 +203,23 @@ On a pipe they do not rewrite: `paint` is silent and `commit` / `succeed` write 
 
 `examples/05-live.eco` runs a spinner, the shorthand, a bar, and a `suspend()`.
 
+You have a stream of compiler output and a progress bar. If they both rewrite the cursor, they erase each other. `LogStream` is the docker-build window: only the last few rows, scrolling, and the bar (or spinner) sits in a slot of that same frame.
+
+```echo
+$log = $ctx->create<element::LogStream>(6);
+$bar = $log->progress();
+$bar->start('compile', 42);
+$log->push('cc -O2 -c src/model.c');
+$bar->advance(1, 'model.o');
+$bar->finish();
+```
+
+`finish` / `succeed` collapses the window to that row. `fail` keeps the tail so you can read what broke. On a pipe the rows stream through as plain lines.
+
+`$log->print('cached')` is a row that stays: it lands above the window and scrolls with the terminal, not with the window. `collapse = false` keeps the window on close, docked row included.
+
+`examples/09-logstream.eco` is a build that succeeds, then one that does not.
+
 ## Prompts
 
 There are three: `Select` is a list, `Text` is a typed line, `Confirm` is a yes or no. Each is minted from the context, and `ask()` already knows where to draw.
@@ -313,6 +330,7 @@ echoc run -m . examples/05-live.eco
 echoc run -m . examples/06-prompts.eco
 echoc run -m . examples/07-session.eco
 echoc run -m . examples/08-create-app.eco
+echoc run -m . examples/09-logstream.eco
 ```
 
 `06`, `07` and `08` take the numbered-list path when stdin is not a tty. You can feed answers with `printf '1\n' | echoc run -m . examples/06-prompts.eco`.
@@ -332,6 +350,7 @@ echoc run -m . examples/08-create-app.eco
 | `src/error.eco`, `src/from.eco` | `Error`, and the `str::from` that makes `"{$e}"` work |
 | `src/help.eco` | the page, one option, a refusal, `--version` |
 | `src/element/step.eco`, `stepper.eco` | what a prompt owes the frame, and the channel down its left |
+| `src/element/logstream.eco` | `LogStream`, the scrolling window, and the slot a docked `Progress` or `Spinner` paints into |
 | `src/element/` | `Table`, `Tree`, `LiveLine`, `LiveRegion`, `Ticker`, `Progress`, `Spinner`, `Select`, `Text`, `Confirm` |
 
 The namespace is `command`. Widgets are `command::element`.

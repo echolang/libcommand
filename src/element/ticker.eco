@@ -1,6 +1,9 @@
 /**
- * The 80ms loop Progress and Spinner share. Paint stays on the widget;
- * this object is running / paused / join.
+ * The tick loop Progress, Spinner and LogStream share. Paint stays on
+ * the widget. This object is running, paused, or joined.
+ *
+ * Progress and Spinner tick every 80ms. A LogStream passes `$interval`
+ * so a burst of pushes flushes on the same clock it was deferred by.
  */
 
 namespace command::element;
@@ -20,6 +23,7 @@ public class Ticker
     public atomic<bool> $paused;
     public thread::handle? $worker;
     public bool $hasWorker;
+    public int32 $period;
 
     constructor()
     {
@@ -28,6 +32,7 @@ public class Ticker
         $this->paused = atomic<bool>(false);
         $this->worker = null;
         $this->hasWorker = false;
+        $this->period = 80;
     }
 
     public function arm(string $who) : void
@@ -43,18 +48,28 @@ public class Ticker
 
     public function start(string $who, LiveTicks $host) : void
     {
+        $this->start($who, $host, 80);
+    }
+
+    public function start(string $who, LiveTicks $host, int32 $ms) : void
+    {
+        if ($ms < 1) {
+            die("{$who}: tick period must be at least 1ms");
+        }
+
+        $this->period = $ms;
         $this->arm($who);
 
         Ticker $self = $this;
         result<thread::handle, thread::error> $r = thread::spawn(function() : void {
             while ($self->running->load()) {
                 if ($self->paused->load()) {
-                    thread::sleep(80);
+                    thread::sleep($self->period);
                     continue;
                 }
 
                 $host->tickOnce();
-                thread::sleep(80);
+                thread::sleep($self->period);
             }
         });
 

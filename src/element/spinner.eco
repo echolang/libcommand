@@ -12,7 +12,7 @@ use std::thread;
 #[atomic]
 public class Spinner : LiveTicks
 {
-    public LiveLine $line;
+    public LiveRow $line;
     public Ticker $ticker;
     public string $text;
     public int32 $frame;
@@ -47,7 +47,7 @@ public class Spinner : LiveTicks
             die('command::element::Spinner: already running');
         }
 
-        $this->ctx->gap();
+        $this->line->gap();
         $this->setText($message);
         $this->frame = 0;
 
@@ -68,13 +68,13 @@ public class Spinner : LiveTicks
     public function succeed(string $message) : void
     {
         $this->ticker->halt();
-        $this->line->commit($this->finalRow(true, $message));
+        $this->line->settle($this->finalRow(true, $message), true);
     }
 
     public function fail(string $message) : void
     {
         $this->ticker->halt();
-        $this->line->commit($this->finalRow(false, $message));
+        $this->line->settle($this->finalRow(false, $message), false);
     }
 
     public function stop() : void

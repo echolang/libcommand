@@ -1,0 +1,239 @@
+/**
+ * LogStream: the last few rows, a docked bar or spinner, and what a pipe
+ * sees (every row, no rewrite).
+ */
+
+use command::element;
+use std::thread;
+
+function liveLog(int32 $lines) : element::LogStream
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, false, 80, true);
+    element::LogStream $log = command::CLIContext::buffer($caps)->create<element::LogStream>($lines);
+    $log->interval = 0;
+
+    return $log;
+}
+
+/**
+ * The bytes of the last paint: everything after the last climb-and-erase.
+ */
+function lastFrame(const string& $vt) : string
+{
+    string $mark = command::CSI_ERASE_DOWN;
+    usize $from = 0;
+    usize $at = $vt->find($mark);
+
+    while ($at < $vt->size()) {
+        $from = $at + $mark->size();
+        $at = $vt->find($mark, $from);
+    }
+
+    return $vt->sub($from, $vt->size() - $from);
+}
+
+test logstream_pipe_streams_every_row
+{
+    element::LogStream $log = command::CLIContext::plain()->create<element::LogStream>(2);
+    $log->push("one\ntwo\n");
+    $log->push('three');
+    $log->close();
+
+    assert($log->ctx->vt == '', 'no rewrite in a log');
+    $got = $log->ctx->page;
+    assert($got->rows->count() == 3, 'every row, not just the window');
+    assert(blockHas($got, ': one'), 'rail');
+    assert(blockHas($got, ': three'), 'last');
+}
+
+test logstream_pipe_docked_bar_comes_last
+{
+    element::LogStream $log = command::CLIContext::plain()->create<element::LogStream>(2);
+    element::Progress $bar = $log->progress();
+    $bar->start('compile', 2);
+    $log->push('cc a.c');
+    $bar->advance(1, 'a.o');
+    $log->push('cc b.c');
+    $bar->finish();
+
+    $rows = $log->ctx->page->rows;
+    assert($rows->count() == 3, 'two rows and the bar');
+    assert($rows[2]->contains('compile') && $rows[2]->contains('100%'), 'bar last');
+}
+
+test logstream_window_keeps_the_last_rows
+{
+    element::LogStream $log = liveLog(3);
+
+    for (int32 $i = 1; $i <= 6; $i++) {
+        $log->push("row{$i}");
+    }
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->contains('row4') && $frame->contains('row5') && $frame->contains('row6'), 'the tail');
+    assert(!$frame->contains('row3'), 'scrolled out');
+    assert($log->region->height == 3, 'window height');
+    $log->close();
+}
+
+test logstream_long_rows_are_cut
+{
+    element::LogStream $log = liveLog(2);
+    $log->push(command::repeatCell('x', 200));
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->contains('...'), 'ellipsis');
+    assert(command::textWidth($frame) < 80, 'never wraps');
+    $log->close();
+}
+
+test logstream_cleans_rows
+{
+    element::LogStream $log = liveLog(4);
+    $log->push("50%\r100%");
+    $log->push("\x1b[31mred\x1b[0m");
+    $log->push("a\tb");
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->contains('100%') && !$frame->contains('50%'), 'carriage return keeps the tail');
+    assert($frame->contains('red') && !$frame->contains("\x1b[31m"), 'sgr stripped');
+    assert($frame->contains('a    b'), 'tab expanded');
+    $log->close();
+}
+
+test logstream_crlf_rows_keep_their_text
+{
+    element::LogStream $log = liveLog(3);
+    $log->push("cc a.c\r\ncc b.c\r\n");
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->contains('cc a.c') && $frame->contains('cc b.c'), 'crlf is a line break, not a wipe');
+    $log->close();
+}
+
+test logstream_a_batch_replaces_the_window
+{
+    element::LogStream $log = liveLog(3);
+    $log->push("a\nb\nc\nd\ne\nf");
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->contains('d') && $frame->contains('e') && $frame->contains('f'), 'the tail of the batch');
+    assert(!$frame->contains(': a') && !$frame->contains(': c'), 'the rest scrolled out');
+    $log->close();
+}
+
+test logstream_docked_bar_collapses_on_finish
+{
+    element::LogStream $log = liveLog(3);
+    element::Progress $bar = $log->progress();
+    $bar->start('compile', 2);
+    $log->push('cc a.c');
+    $bar->advance(1, 'a.o');
+    $log->push('cc b.c');
+
+    string $live = lastFrame($log->ctx->vt);
+    assert($live->contains('cc b.c') && $live->contains('compile'), 'window and bar together');
+    assert($live->find('cc b.c') < $live->find('compile'), 'bar below');
+
+    $bar->finish();
+    string $final = lastFrame($log->ctx->vt);
+    assert($final->contains('100%'), 'finished bar');
+    assert(!$final->contains('cc a.c') && !$final->contains('cc b.c'), 'window collapsed');
+    assert($log->region->height == 0, 'committed');
+}
+
+test logstream_docked_bar_failure_keeps_the_tail
+{
+    element::LogStream $log = liveLog(3);
+    element::Progress $bar = $log->progress();
+    $bar->start('compile', 4);
+    $log->push('cc a.c');
+    $log->push('error: a.c:3: expected ;');
+    $bar->advance(1, 'a.o');
+    $bar->fail();
+
+    string $final = lastFrame($log->ctx->vt);
+    assert($final->contains('expected ;'), 'the tail stays');
+    assert($final->contains('compile'), 'failed bar');
+    assert($final->find('expected ;') < $final->find('compile'), 'bar below');
+}
+
+test logstream_docked_spinner_sits_above
+{
+    element::LogStream $log = liveLog(3);
+    element::Spinner $s = $log->spinner();
+    $s->start('building image');
+    $log->push('Step 1/2 : FROM alpine');
+
+    string $frame = lastFrame($log->ctx->vt);
+    assert($frame->find('building image') < $frame->find('Step 1/2'), 'spinner on top');
+    $s->succeed('built');
+
+    string $final = lastFrame($log->ctx->vt);
+    assert($final->contains('built') && !$final->contains('Step 1/2'), 'collapsed');
+}
+
+test logstream_print_stays_outside_the_window
+{
+    element::LogStream $log = liveLog(2);
+    $log->push('r1');
+    $log->print('cached');
+    $log->push('r2');
+    $log->push('r3');
+
+    assert(blockHas($log->ctx->page, 'cached'), 'a real line');
+    string $frame = lastFrame($log->ctx->vt);
+    assert(!$frame->contains('cached'), 'not part of the window');
+    assert($frame->contains('r3'), 'window still live');
+    $log->close();
+}
+
+test logstream_keeps_rows_without_collapse
+{
+    element::LogStream $log = liveLog(2);
+    $log->collapse = false;
+    $log->push('kept');
+    $log->close();
+
+    assert(lastFrame($log->ctx->vt)->contains('kept'), 'window committed');
+    assert($log->region->height == 0, 'no longer live');
+}
+
+test logstream_close_without_collapse_keeps_the_bar
+{
+    element::LogStream $log = liveLog(3);
+    $log->collapse = false;
+    element::Progress $bar = $log->progress();
+    $bar->start('compile', 1);
+    $log->push('cc a.c');
+    $log->close();
+
+    string $final = lastFrame($log->ctx->vt);
+    assert($final->contains('cc a.c'), 'window stays');
+    assert($final->contains('compile'), 'bar stays');
+}
+
+test logstream_survives_a_pushing_thread
+{
+    element::LogStream $log = liveLog(4);
+    element::Progress $bar = $log->progress();
+    $bar->start('ingest', 500);
+
+    result<thread::handle, thread::error> $r = thread::spawn(function() : void {
+        for (int32 $i = 0; $i < 500; $i++) {
+            $log->push("line {$i}");
+        }
+    });
+
+    for (int32 $i = 0; $i < 500; $i++) {
+        $bar->advance(1, '');
+    }
+
+    $r->unwrap()->join();
+    $bar->fail();
+
+    string $final = lastFrame($log->ctx->vt);
+    assert($final->contains('line 499'), 'last row made it');
+    assert(!$final->contains('line 495'), 'only the window');
+    assert($final->contains('ingest'), 'bar');
+}

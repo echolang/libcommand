@@ -6,11 +6,29 @@
  * Vocabulary is carriage return and erase-to-end-of-line. Never cursor-up.
  * Interactive paint is raw VT (`CLIContext.vt`). A finished row on a pipe
  * is `line`, and lands on `CLIContext.page`.
+ *
+ * A LogStream is a different destination: a window, cursor-up. It answers
+ * the same LiveRow questions, so a Progress or Spinner can sit in that
+ * window without this type knowing about logs.
  */
 
 namespace command::element;
 
-public class LiveLine
+/**
+ * Where a live glyph row goes. LiveLine is the trailing CR+EL line.
+ * LogStream is a slot in a scrolling window. Progress and Spinner talk
+ * to this, not to a concrete type, so docking is just assigning `$line`.
+ */
+public interface LiveRow
+{
+    const function interactive() : bool;
+    function paint(const string& $text) : void;
+    function settle(const string& $text, bool $ok) : void;
+    function erase() : void;
+    function gap() : void;
+}
+
+public class LiveLine : LiveRow
 {
     public command::CLIContext $ctx;
 
@@ -60,5 +78,20 @@ public class LiveLine
         }
 
         $this->ctx->write(command::CSI_ERASE_LINE);
+    }
+
+    /**
+     * The work is done. On a LiveLine that is a commit, and `$ok` is
+     * ignored. A LogStream collapses on success and keeps the tail on
+     * failure, which is why the flag exists.
+     */
+    public function settle(const string& $text, bool $ok) : void
+    {
+        $this->commit($text);
+    }
+
+    public function gap() : void
+    {
+        $this->ctx->gap();
     }
 }

@@ -89,6 +89,29 @@ public struct ProgressTheme
 }
 
 /**
+ * The rail in front of every row of a LogStream window. Separate from the
+ * session bar on purpose: streamed output should never read as a step.
+ */
+public struct LogTheme
+{
+    public string $rail;
+
+    constructor(string $rail)
+    {
+        $this->rail = $rail;
+    }
+}
+
+public function logTheme(bool $unicode) : LogTheme
+{
+    if ($unicode) {
+        return LogTheme('┊');
+    }
+
+    return LogTheme(':');
+}
+
+/**
  * Eliding is a property of the terminal, not of a widget, so there is no
  * ellipsis here: `fitHead` takes the one on `PromptTheme` and every row in
  * the library is cut by a Stepper.
@@ -141,7 +164,7 @@ public struct SpinnerTheme
 
 /**
  * The colour a finished run settles on. Lives beside `SpinnerTheme::outcome`
- * because the glyph and the colour are one decision - split them and a theme
+ * because the glyph and the colour are one decision. Split them and a theme
  * change lands on the spinner and leaves the progress bar green.
  */
 public function outcomeSgr(bool $ok) : string

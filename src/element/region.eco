@@ -1,16 +1,17 @@
 /**
- * A live block of more than one row. Selection prompts rewrite a menu;
- * Progress and Spinner keep using LiveLine (CR+EL, never cursor-up).
+ * A live block of more than one row. Selection prompts rewrite a menu.
+ * A LogStream window is painted here. Progress and Spinner on their own
+ * still use LiveLine (CR+EL, never cursor-up).
  *
  * Vocabulary is cursor-up and erase-down. The previous height is how far
  * to climb before the next paint.
  *
  * The terminal's own cursor is hidden for as long as a frame is on screen.
- * Widgets drawn here paint their caret into the frame - reverse video on the
- * scalar it sits on - and the real cursor, parked wherever the last byte of
- * the frame landed, would read as a second caret. It comes back on commit,
- * on erase, and if this region is dropped still hidden. The shim brings it
- * back on a signal.
+ * Widgets drawn here paint their caret into the frame (reverse video on
+ * the scalar it sits on), and the real cursor, parked wherever the last
+ * byte of the frame landed, would read as a second caret. It comes back
+ * on commit, on erase, and if this region is dropped still hidden. The
+ * shim brings it back on a signal.
  */
 
 namespace command::element;
@@ -126,7 +127,7 @@ public class LiveRegion
     /**
      * The bytes that take the terminal's cursor away, once. The shim is told
      * as well, so a Ctrl-C out of a live prompt does not leave a terminal
-     * without a cursor - ISIG stays set in raw mode, so that is a real exit.
+     * without a cursor. ISIG stays set in raw mode, so that is a real exit.
      */
     function hide() : string
     {

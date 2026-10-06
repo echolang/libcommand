@@ -12,7 +12,7 @@ test context_create_text_and_spinner
     element::Spinner $spin = $ctx->create<element::Spinner>();
 
     assert($name->title == 'What is your name?', 'title lands');
-    assert(!$spin->line->ctx->toStream, 'a plain context captures');
+    assert(!$spin->ctx->toStream, 'a plain context captures');
 }
 
 test context_create_select_with_kind
