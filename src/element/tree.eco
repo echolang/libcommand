@@ -1,9 +1,14 @@
-/**
- * A tree of labels. Data: you build the children arrays, then render.
+/*
+ * A tree of labels. You build the children arrays, then render.
  */
 
 namespace command::element;
 
+/**
+ * One label, and the nodes under it.
+ *
+ * Push into `$children` directly.
+ */
 public struct Node
 {
     public string $label;
@@ -16,6 +21,21 @@ public struct Node
     }
 }
 
+#[docs::example: "examples/04-widgets.eco"]
+/**
+ * A tree of labels.
+ *
+ * The constructor argument is the root label. Build the rest by pushing
+ * into `$node->children`.
+ *
+ * ```echo
+ * $tree = $ctx->create<element::Tree>('root');
+ * element::Node $src = element::Node('src');
+ * $src->children[] = element::Node('main.eco');
+ * $tree->root->children[] = $src;
+ * $tree->display();
+ * ```
+ */
 public class Tree
 {
     public command::CLIContext $ctx;
@@ -29,6 +49,9 @@ public class Tree
         $this->captured = command::Block();
     }
 
+    /**
+     * The tree as rows, for composing.
+     */
     public const function render() : command::Block
     {
         $out = command::Block();
@@ -38,6 +61,9 @@ public class Tree
         return $out;
     }
 
+    /**
+     * Write the tree through the context it was minted with.
+     */
     public function display() : void
     {
         $page = $this->render();

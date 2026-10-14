@@ -1,13 +1,22 @@
-/**
+/*
  * A yes or no.
- *
- * Interactive: left and right move, 'y' and 'n' answer outright, enter
- * confirms. Otherwise the question and a line of stdin, where anything
- * starting with 'y' is yes and anything starting with 'n' is no.
  */
 
 namespace command::element;
 
+#[docs::example: "examples/06-prompts.eco"]
+/**
+ * A yes or no.
+ *
+ * On a terminal, left and right move, `y` and `n` answer outright, and
+ * enter confirms. The highlighted answer starts on yes. On a pipe, the
+ * call prints the question and reads a line: anything starting with `y`
+ * is yes, anything starting with `n` is no.
+ *
+ * ```echo
+ * bool $go = element::confirm($ctx, 'Continue?');
+ * ```
+ */
 public class Confirm : Step
 {
     public command::CLIContext $ctx;
@@ -27,33 +36,50 @@ public class Confirm : Step
         $this->seat($ctx, $title, $start);
     }
 
+    /**
+     * The channel this question draws on.
+     */
     public const function channel() : Stepper
     {
         return $this->ctx->channel();
     }
 
+    /**
+     * The title the channel draws for this step.
+     */
     public const function head() : string
     {
         return $this->title;
     }
 
+    /**
+     * The two answers, while the question is waiting.
+     */
     public const function body(const StepContext& $ctx) : array<string>
     {
         return oneRow(confirmRow($this, $ctx));
     }
 
+    /**
+     * The chosen word, once the step has answered.
+     */
     public const function summary(const StepContext& $ctx) : array<string>
     {
         return oneRow(command::styled(confirmWord($this), command::SGR_DIM, $ctx->caps->color));
     }
 
-    /** Rename the two answers, for a question they do not fit. */
+    /**
+     * Rename the two answers, when yes and no are the wrong pair.
+     */
     public function words(string $yes, string $no) : void
     {
         $this->yes = $yes;
         $this->no = $no;
     }
 
+    /**
+     * Draw the question and return the answer.
+     */
     public function ask() : bool
     {
         $this->ctx->gap();
@@ -65,16 +91,25 @@ public class Confirm : Step
         return askLineConfirm($this);
     }
 
+    /**
+     * The question as the channel would draw it right now.
+     */
     public function frame() : command::Block
     {
         return stepFrame($this->channel(), $this, StepState::active);
     }
 
+    /**
+     * The answer as it stands. Yes is true.
+     */
     public function result() : bool
     {
         return $this->value;
     }
 
+    /**
+     * Apply one key. True means the answer is settled.
+     */
     public function feed(const KeyEvent& $event) : bool
     {
         if ($event->key == Key::enter) {
@@ -98,6 +133,9 @@ public class Confirm : Step
         return false;
     }
 
+    /**
+     * `feed` for a key that carries no text.
+     */
     public function feed(Key $key) : bool
     {
         return $this->feed(KeyEvent($key));
@@ -133,6 +171,9 @@ function confirmWord(const Confirm& $c) : string
     return $c->no;
 }
 
+/**
+ * Ask a yes or no and return it. Yes is true.
+ */
 public function confirm(command::CLIContext $ctx, string $title) : bool
 {
     Confirm $c = Confirm($ctx, $title);

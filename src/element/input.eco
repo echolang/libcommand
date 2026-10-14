@@ -1,19 +1,15 @@
-/**
+/*
  * A line of text the user types.
- *
- * Interactive: printable keys, backspace, delete, left/right, home/end,
- * Ctrl-W and Ctrl-U. Otherwise a plain question and a line of stdin.
- *
- * A placeholder is a hint and never becomes the answer; a fallback is what an
- * empty line returns. They are two fields because they are two ideas.
  */
 
 namespace command::element;
 
 /**
- * One line and a caret. Every index is a byte index into UTF-8, and every
- * move lands on a scalar boundary - a caret between the two bytes of 'ä' is
- * not a position this type can hold.
+ * One line and a caret.
+ *
+ * Every index is a byte index into UTF-8, and every move lands on a scalar
+ * boundary. A caret between the two bytes of `ä` is not a position this
+ * type can hold.
  */
 public class TextBuffer
 {
@@ -32,16 +28,25 @@ public class TextBuffer
         $this->caret = $value->size();
     }
 
+    /**
+     * True when the line has no scalars.
+     */
     public const function empty() : bool
     {
         return $this->value->empty();
     }
 
+    /**
+     * The column the caret sits on. One scalar is width 1.
+     */
     public const function caretColumn() : int32
     {
         return command::textWidth($this->value, $this->caret);
     }
 
+    /**
+     * How many columns the line occupies.
+     */
     public const function columns() : int32
     {
         return command::textWidth($this->value);
@@ -95,6 +100,9 @@ public class TextBuffer
         $this->value = $head;
     }
 
+    /**
+     * Insert `$text` at the caret, one scalar at a time.
+     */
     public function insertText(const string& $text) : void
     {
         if ($text->empty()) {
@@ -113,6 +121,9 @@ public class TextBuffer
         $this->caret = $this->caret + $text->size();
     }
 
+    /**
+     * Delete the scalar before the caret. False when there is nothing there.
+     */
     public function backspace() : bool
     {
         if ($this->caret == 0) {
@@ -126,6 +137,9 @@ public class TextBuffer
         return true;
     }
 
+    /**
+     * Delete the scalar at the caret. False when the caret is at the end.
+     */
     public function deleteForward() : bool
     {
         if ($this->caret >= $this->value->size()) {
@@ -137,6 +151,9 @@ public class TextBuffer
         return true;
     }
 
+    /**
+     * Move the caret one scalar left.
+     */
     public function left() : bool
     {
         if ($this->caret == 0) {
@@ -148,6 +165,9 @@ public class TextBuffer
         return true;
     }
 
+    /**
+     * Move the caret one scalar right.
+     */
     public function right() : bool
     {
         if ($this->caret >= $this->value->size()) {
@@ -159,11 +179,17 @@ public class TextBuffer
         return true;
     }
 
+    /**
+     * Move the caret to the start of the line.
+     */
     public function home() : void
     {
         $this->caret = 0;
     }
 
+    /**
+     * Move the caret to the end of the line.
+     */
     public function end() : void
     {
         $this->caret = $this->value->size();
@@ -174,6 +200,9 @@ public class TextBuffer
      * boundary, so the byte handed to `bufferIsSpace` is always a lead byte - and
      * a multi-byte lead is never a space. Simplifying either scan to
      * `$at - 1` breaks that quietly.
+     */
+    /**
+     * Delete back to the start of the word. This is Ctrl-W.
      */
     public function killWord() : bool
     {
@@ -212,6 +241,9 @@ public class TextBuffer
     /**
      * Readline's Ctrl-U: everything before the caret, not the whole line.
      */
+    /**
+     * Delete from the caret back to the start of the line. This is Ctrl-U.
+     */
     public function killLine() : bool
     {
         if ($this->caret == 0) {
@@ -230,6 +262,24 @@ function bufferIsSpace(uint8 $b) : bool
     return $b == command::CH_SPACE || $b == command::CH_TAB;
 }
 
+#[docs::example: "examples/06-prompts.eco"]
+/**
+ * A line the user types.
+ *
+ * On a terminal: backspace and delete, left and right, home and end,
+ * Ctrl-W for the last word, Ctrl-U for the line. Every move is a whole
+ * scalar. On a pipe: the question, and a line of stdin.
+ *
+ * `hint` is drawn in the empty field. `otherwise` is the value an empty
+ * line means. They are two fields because they are two ideas.
+ *
+ * ```echo
+ * $p = $ctx->create<element::Text>('Where should we create it?');
+ * $p->hint('./my-app');
+ * $p->otherwise('./my-app');
+ * string $dir = $p->ask();
+ * ```
+ */
 public class Text : Step
 {
     public command::CLIContext $ctx;
@@ -246,6 +296,9 @@ public class Text : Step
         $this->seat($ctx, $title);
     }
 
+    /**
+     * The channel this prompt draws on.
+     */
     public const function channel() : Stepper
     {
         return $this->ctx->channel();
@@ -263,38 +316,57 @@ public class Text : Step
         $this->region = LiveRegion($ctx);
     }
 
+    /**
+     * The title the channel draws for this step.
+     */
     public const function head() : string
     {
         return $this->title;
     }
 
+    /**
+     * The field, while it is waiting.
+     */
     public const function body(const StepContext& $ctx) : array<string>
     {
         return oneRow(drawValue($this, $ctx));
     }
 
+    /**
+     * The answer, once the step has settled.
+     */
     public const function summary(const StepContext& $ctx) : array<string>
     {
         return oneRow(command::styled(textResult($this), command::SGR_DIM, $ctx->caps->color));
     }
 
-    /** A hint shown in the empty field. Never the answer. */
+    /**
+     * A suggestion drawn in the empty field. It is never the answer.
+     */
     public function hint(string $placeholder) : void
     {
         $this->placeholder = $placeholder;
     }
 
-    /** What an empty line means. */
+    /**
+     * The value an empty line means.
+     */
     public function otherwise(string $value) : void
     {
         $this->fallback = $value;
     }
 
+    /**
+     * Whether an empty line, with no fallback, is a refusal. This starts on.
+     */
     public function require(bool $on) : void
     {
         $this->must = $on;
     }
 
+    /**
+     * Draw the prompt and return the line.
+     */
     public function ask() : string
     {
         $this->ctx->gap();
@@ -306,16 +378,25 @@ public class Text : Step
         return askLineText($this);
     }
 
+    /**
+     * The field as the channel would draw it right now.
+     */
     public function frame() : command::Block
     {
         return stepFrame($this->channel(), $this, StepState::active);
     }
 
+    /**
+     * The line as it stands, fallback included when the field is empty.
+     */
     public function result() : string
     {
         return textResult($this);
     }
 
+    /**
+     * Apply one key. True means the line is settled.
+     */
     public function feed(const KeyEvent& $event) : bool
     {
         if ($event->key == Key::enter) {
@@ -334,6 +415,9 @@ public class Text : Step
         return false;
     }
 
+    /**
+     * `feed` for a key that carries no text.
+     */
     public function feed(Key $key) : bool
     {
         return $this->feed(KeyEvent($key));
@@ -341,7 +425,7 @@ public class Text : Step
 
     /**
      * Type a whole string, one scalar at a time. `type('äöü')` is three
-     * keystrokes, not six - the shape a terminal would deliver.
+     * keystrokes, not six. That is the shape a terminal would deliver.
      */
     public function type(const string& $text) : void
     {
@@ -360,6 +444,9 @@ public class Text : Step
     }
 }
 
+/**
+ * Ask for a line. An empty answer is a refusal.
+ */
 public function text(command::CLIContext $ctx, string $title) : string
 {
     Text $p = Text($ctx, $title);
@@ -367,6 +454,9 @@ public function text(command::CLIContext $ctx, string $title) : string
     return $p->ask();
 }
 
+/**
+ * Ask for a line, with `$placeholder` as both the hint and the fallback.
+ */
 public function text(command::CLIContext $ctx, string $title, string $placeholder) : string
 {
     Text $p = Text($ctx, $title);

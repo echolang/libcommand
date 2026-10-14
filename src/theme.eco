@@ -6,6 +6,9 @@
 
 namespace command;
 
+/**
+ * Glyphs for the help page. Widgets pick this from unicode. Colour is not in here.
+ */
 public struct HelpTheme
 {
     public string $bar;
@@ -20,6 +23,9 @@ public struct HelpTheme
     }
 }
 
+/**
+ * Branch glyphs for a tree. Unicode or ascii. Widgets pick this.
+ */
 public struct TreeTheme
 {
     public string $branch;
@@ -36,6 +42,9 @@ public struct TreeTheme
     }
 }
 
+/**
+ * Border glyphs for a table. Unicode or ascii. Widgets pick this.
+ */
 public struct BorderTheme
 {
     public string $h;
@@ -78,6 +87,9 @@ public struct BorderTheme
     }
 }
 
+/**
+ * The fill cell of a progress bar. Widgets pick this.
+ */
 public struct ProgressTheme
 {
     public string $cell;
@@ -102,6 +114,9 @@ public struct LogTheme
     }
 }
 
+/**
+ * The log rail for this unicode setting.
+ */
 public function logTheme(bool $unicode) : LogTheme
 {
     if ($unicode) {
@@ -176,6 +191,9 @@ public function outcomeSgr(bool $ok) : string
     return SGR_ERROR;
 }
 
+/**
+ * The help-page glyphs for this unicode setting.
+ */
 public function helpTheme(bool $unicode) : HelpTheme
 {
     if ($unicode) {
@@ -185,6 +203,9 @@ public function helpTheme(bool $unicode) : HelpTheme
     return HelpTheme('', '-', false);
 }
 
+/**
+ * The tree glyphs for this unicode setting.
+ */
 public function treeTheme(bool $unicode) : TreeTheme
 {
     if ($unicode) {
@@ -194,6 +215,9 @@ public function treeTheme(bool $unicode) : TreeTheme
     return TreeTheme('|- ', '`- ', '| ', '  ');
 }
 
+/**
+ * The table border for this unicode setting.
+ */
 public function borderTheme(bool $unicode) : BorderTheme
 {
     if ($unicode) {
@@ -203,6 +227,9 @@ public function borderTheme(bool $unicode) : BorderTheme
     return BorderTheme('-', '|', '+', '+', '+', '+', '+', '+', '+', '+', '+');
 }
 
+/**
+ * The progress fill for this unicode setting.
+ */
 public function progressTheme(bool $unicode) : ProgressTheme
 {
     if ($unicode) {
@@ -289,6 +316,9 @@ public struct PromptTheme
     }
 }
 
+/**
+ * The spinner frames and the two finished glyphs, for this unicode setting.
+ */
 public function spinnerTheme(bool $unicode) : SpinnerTheme
 {
     array<string> $frames = array<string>();
@@ -316,6 +346,9 @@ public function spinnerTheme(bool $unicode) : SpinnerTheme
     return SpinnerTheme('*', 'x', $frames);
 }
 
+/**
+ * The prompt and channel glyphs for this unicode setting.
+ */
 public function promptTheme(bool $unicode) : PromptTheme
 {
     if ($unicode) {

@@ -1,16 +1,18 @@
-/**
- * What is an option, and which commands accept it. One row per flag; parse,
- * usage, the page and every refusal read this. Adding a flag is adding a row.
- *
- * Command is a class because it has identity while you fill it: handles are
- * indices into its arrays, and copying a half-built command would desynchronise
- * them.
+/*
+ * The option table. One row per flag. Parse, usage, the page and every
+ * refusal read it.
  */
 
 namespace command;
 
 public const int32 ROOT_BIT = 1;
 
+/**
+ * Whether a row takes a value, and how often.
+ *
+ * `flag` takes none. `value` takes one. `repeated` takes the value again
+ * each time the option is stated.
+ */
 public enum OptionArity
 {
     case flag;
@@ -18,6 +20,12 @@ public enum OptionArity
     case repeated;
 }
 
+/**
+ * One legal word for an arg whose values are a closed set.
+ *
+ * `commands` at 0 means the value is legal wherever the option is. A
+ * non-zero mask restricts it to those subcommands.
+ */
 public struct OptionValue
 {
     public string $name;
@@ -33,6 +41,12 @@ public struct OptionValue
         $this->description = $description;
     }
 
+    /**
+     * Whether this value is legal for `$bit`.
+     *
+     * A value with no command mask of its own inherits the option's mask.
+     * A mask of 0 on both means the value is legal everywhere.
+     */
     public const function accepted(const Option& $option, int32 $bit) : bool
     {
         int32 $mask = $this->commands;
@@ -49,6 +63,10 @@ public struct OptionValue
     }
 }
 
+/**
+ * One row of the table: names, arity, which commands accept it, and the
+ * prose the help page prints.
+ */
 public struct Option
 {
     public int32 $id;
@@ -99,11 +117,17 @@ public struct Option
         $this->values = $values;
     }
 
+    /**
+     * True when the row takes a value. A flag does not.
+     */
     public const function takesValue() : bool
     {
         return $this->arity != OptionArity::flag;
     }
 
+    /**
+     * The spellings, as the help page writes them: `-o, --output, --out`.
+     */
     public const function flagNames() : string
     {
         string $names = '';
@@ -121,6 +145,9 @@ public struct Option
         return $names;
     }
 
+    /**
+     * `flagNames`, plus the metavar when the row takes a value.
+     */
     public const function spelling() : string
     {
         string $names = $this->flagNames();
@@ -132,6 +159,9 @@ public struct Option
         return "{$names} {$this->metavar}";
     }
 
+    /**
+     * The closed set of value names, joined with commas.
+     */
     public const function valueCsv() : string
     {
         string $joined = '';
@@ -149,6 +179,9 @@ public struct Option
         return $joined;
     }
 
+    /**
+     * Whether this row is legal for `$bit`. A command mask of 0 is everywhere.
+     */
     public const function accepted(int32 $bit) : bool
     {
         if ($this->commands == 0) {
@@ -159,6 +192,13 @@ public struct Option
     }
 }
 
+/**
+ * The positional words one command accepts.
+ *
+ * `min` and `max` bound how many. `max` of -1 means unlimited. The
+ * constructor that takes nothing is min 0 and max 0: an undeclared word
+ * is a refusal.
+ */
 public struct Positionals
 {
     public string $metavar;
@@ -196,6 +236,9 @@ public struct Positionals
     }
 }
 
+/**
+ * One subcommand row: its name, the bit that marks it, and its positionals.
+ */
 public struct SubcommandInfo
 {
     public int32 $id;
@@ -223,6 +266,9 @@ public struct SubcommandInfo
     }
 }
 
+/**
+ * A handle to a subcommand row. An index, not a name.
+ */
 public struct Subcommand
 {
     public int32 $id;
@@ -235,6 +281,9 @@ public struct Subcommand
     }
 }
 
+/**
+ * A handle to a flag row. An index, not a name.
+ */
 public struct Flag
 {
     public int32 $id;
@@ -245,6 +294,9 @@ public struct Flag
     }
 }
 
+/**
+ * A handle to an arg row. An index, not a name.
+ */
 public struct Arg
 {
     public int32 $id;
@@ -255,6 +307,23 @@ public struct Arg
     }
 }
 
+#[docs::groups: ["Building", "Parsing", "Lookup"]]
+#[docs::example: "examples/02-subcommands.eco"]
+/**
+ * The table. Adding a flag is adding a row. Parse, usage, the help page
+ * and every refusal read those rows.
+ *
+ * A class, on purpose. Handles are indices into this object's arrays, and
+ * copying a half-built table would desynchronise them. After you finish
+ * building, parse and help take `const Command&`.
+ *
+ * ```echo
+ * command::Command $app = command::Command('greet', '0.1.0', 'say hello');
+ * command::Arg $out = $app->arg('output', 'o', '<file>', 'where it is written');
+ * $app->require($out);
+ * command::Outcome $r = $app->parse(env::argv());
+ * ```
+ */
 public class Command
 {
     public string $name;
@@ -320,6 +389,13 @@ public class Command
         $this->describe($this->color, $colorProse);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Register a subcommand and return its handle.
+     *
+     * The summary is the one line on the compact page. The description is
+     * the prose for this command's own `--help`.
+     */
     public function command(string $name, string $summary, string $description) : Subcommand
     {
         if ($this->nextBit <= 0) {
@@ -334,6 +410,13 @@ public class Command
         return Subcommand($id, $bit);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Positionals on the root command.
+     *
+     * `min` and `max` bound how many words. `max` of -1 means unlimited.
+     * An empty category files the row under no extra heading.
+     */
     public function positional(
         string $metavar,
         string $summary,
@@ -346,6 +429,10 @@ public class Command
         $this->positionals = Positionals($metavar, $summary, $description, $category, $min, $max);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Positionals on one subcommand. Same bounds as the root form.
+     */
     public function positional(
         Subcommand $cmd,
         string $metavar,
@@ -361,11 +448,21 @@ public class Command
         $this->commands[$cmd->id] = $row;
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Whether a leftover `--` is accepted.
+     *
+     * The default is yes, and the words after it land in `Parsed.tail`.
+     */
     public function tail(bool $accepts) : void
     {
         $this->acceptsTail = $accepts;
     }
 
+    #[docs::group: "Building"]
+    /**
+     * A row with no value. The shorthand is one character, or empty.
+     */
     public function flag(string $name, string $shorthand, string $summary) : Flag
     {
         int32 $id = thisAdd($this, $name, '', $shorthand, .flag, $summary);
@@ -373,6 +470,10 @@ public class Command
         return Flag($id);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * A row that takes one value. `metavar` is the placeholder in the usage line.
+     */
     public function arg(string $name, string $shorthand, string $metavar, string $summary) : Arg
     {
         int32 $id = thisAdd($this, $name, $metavar, $shorthand, .value, $summary);
@@ -380,6 +481,10 @@ public class Command
         return Arg($id);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * A row that takes the value again each time it is stated.
+     */
     public function repeat(string $name, string $shorthand, string $metavar, string $summary) : Arg
     {
         int32 $id = thisAdd($this, $name, $metavar, $shorthand, .repeated, $summary);
@@ -387,46 +492,82 @@ public class Command
         return Arg($id);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * A second long name on the same flag. `--colour` is this on `--color`.
+     */
     public function alias(Flag $opt, string $alias) : void
     {
         setAlias($this, $opt->id, $alias);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * A second long name on the same arg.
+     */
     public function alias(Arg $opt, string $alias) : void
     {
         setAlias($this, $opt->id, $alias);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The prose `--help <option>` prints for this flag, as one string.
+     */
     public function describe(Flag $opt, string $description) : void
     {
         setDescription($this, $opt->id, linesOf($description));
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The prose `--help <option>` prints for this flag, one entry per line.
+     */
     public function describe(Flag $opt, const array<string>& $lines) : void
     {
         setDescription($this, $opt->id, $lines);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The prose `--help <option>` prints for this arg, as one string.
+     */
     public function describe(Arg $opt, string $description) : void
     {
         setDescription($this, $opt->id, linesOf($description));
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The prose `--help <option>` prints for this arg, one entry per line.
+     */
     public function describe(Arg $opt, const array<string>& $lines) : void
     {
         setDescription($this, $opt->id, $lines);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The heading the compact page files this flag under.
+     */
     public function category(Flag $opt, string $heading) : void
     {
         setCategory($this, $opt->id, $heading);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The heading the compact page files this arg under.
+     */
     public function category(Arg $opt, string $heading) : void
     {
         setCategory($this, $opt->id, $heading);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The word `value()` returns when this arg was not stated.
+     */
     public function fallback(Arg $opt, string $value) : void
     {
         Option $row = $this->options[$opt->id];
@@ -434,48 +575,84 @@ public class Command
         $this->options[$opt->id] = $row;
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Make this flag legal on one command, without requiring it.
+     */
     public function accept(Flag $opt, Subcommand $cmd) : void
     {
         orCommands($this, $opt->id, $cmd->bit);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Make this arg legal on one command, without requiring it.
+     */
     public function accept(Arg $opt, Subcommand $cmd) : void
     {
         orCommands($this, $opt->id, $cmd->bit);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The root invocation has to state this flag.
+     */
     public function require(Flag $opt) : void
     {
         orRequired($this, $opt->id, ROOT_BIT);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The root invocation has to state this arg.
+     */
     public function require(Arg $opt) : void
     {
         orRequired($this, $opt->id, ROOT_BIT);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * This command has to state the flag, and the flag is legal there.
+     */
     public function require(Flag $opt, Subcommand $cmd) : void
     {
         orRequired($this, $opt->id, $cmd->bit);
         orCommands($this, $opt->id, $cmd->bit);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * This command has to state the arg, and the arg is legal there.
+     */
     public function require(Arg $opt, Subcommand $cmd) : void
     {
         orRequired($this, $opt->id, $cmd->bit);
         orCommands($this, $opt->id, $cmd->bit);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Two args that answer one question. Stating both is a refusal.
+     */
     public function exclude(Arg $a, Arg $b) : void
     {
         excludeIds($this, $a->id, $b->id);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Two flags that answer one question. Stating both is a refusal.
+     */
     public function exclude(Flag $a, Flag $b) : void
     {
         excludeIds($this, $a->id, $b->id);
     }
 
+    #[docs::group: "Building"]
+    /**
+     * The closed set of values this arg accepts.
+     */
     public function values(Arg $opt, array<OptionValue> $values) : void
     {
         Option $row = $this->options[$opt->id];
@@ -483,6 +660,12 @@ public class Command
         $this->options[$opt->id] = $row;
     }
 
+    #[docs::group: "Building"]
+    /**
+     * Restrict one value name to one command.
+     *
+     * `$name` has to be a value `values` already registered. Anything else dies.
+     */
     public function valueOn(Arg $opt, string $name, Subcommand $cmd) : void
     {
         Option $row = $this->options[$opt->id];
@@ -503,6 +686,13 @@ public class Command
         die("command::Command: unknown value '{$name}'");
     }
 
+    #[docs::group: "Parsing"]
+    /**
+     * Turn argv into stated values.
+     *
+     * The outcome keeps the partial parse on a refusal, so a bad flag still
+     * carries the colour the invocation asked for.
+     */
     public const function parse(const array<string>& $argv) : Outcome
     {
         Parser $parser = Parser($this);
@@ -510,6 +700,10 @@ public class Command
         return $parser->parse($argv);
     }
 
+    #[docs::group: "Lookup"]
+    /**
+     * The option whose long name or alias is `$name`, or null.
+     */
     public const function optionForLong(const string& $name) : Option?
     {
         usize $i = 0;
@@ -529,6 +723,10 @@ public class Command
         return null;
     }
 
+    #[docs::group: "Lookup"]
+    /**
+     * The option whose shorthand is this one character, or null.
+     */
     public const function optionForShort(const string& $ch) : Option?
     {
         if ($ch->size() != 1) {
@@ -548,6 +746,10 @@ public class Command
         return null;
     }
 
+    #[docs::group: "Lookup"]
+    /**
+     * The subcommand row named `$word`, or null.
+     */
     public const function subcommandForWord(const string& $word) : SubcommandInfo?
     {
         usize $i = 0;
@@ -563,6 +765,10 @@ public class Command
         return null;
     }
 
+    #[docs::group: "Lookup"]
+    /**
+     * The subcommand names, joined for a refusal: `'build' or 'test'`.
+     */
     public const function commandWordList() : string
     {
         string $joined = '';

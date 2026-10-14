@@ -1,15 +1,18 @@
-/**
+/*
  * What this terminal can do, and the SGR sequences everything draws with.
- * Colour and unicode fail apart; width 0 means "unknown, the caller decides".
- *
- * One table of escape sequences, one styled() - two places spelling an SGR
- * is two places for a theme change to land on one of them.
+ * Colour and unicode fail apart. Width 0 means unknown.
  */
 
 namespace command;
 
 use std::env;
 
+/**
+ * How colour is chosen.
+ *
+ * `always` and `never` win outright. `auto` asks `NO_COLOR`,
+ * `CLICOLOR_FORCE`, `TERM=dumb`, then whether the stream is a terminal.
+ */
 public enum ColorChoice
 {
     case auto;
@@ -17,6 +20,9 @@ public enum ColorChoice
     case never;
 }
 
+/**
+ * Which standard stream a context is bound to.
+ */
 public enum TerminalStream
 {
     case stdout;
@@ -24,6 +30,13 @@ public enum TerminalStream
     case stdin;
 }
 
+/**
+ * What the stream can do.
+ *
+ * Colour and unicode fail apart: a CI log can have one and not the other.
+ * Width 0 means the terminal never said. Help assumes 80 and caps at 100.
+ * A live line assumes 80.
+ */
 public struct TerminalCapabilities
 {
     public bool $color;
@@ -83,6 +96,7 @@ public const CURSOR_SHOW = "\x1b[?25h";
 public const CSI_ERASE_LINE = "\r\x1b[K";
 public const CSI_ERASE_DOWN = "\r\x1b[J";
 
+#[docs::hidden]
 public function cursorUp(int32 $rows) : string
 {
     if ($rows < 1) {
@@ -92,11 +106,20 @@ public function cursorUp(int32 $rows) : string
     return "\x1b[{$rows}A";
 }
 
+/**
+ * No colour, no unicode, width 0, not interactive.
+ */
 public function plain() : TerminalCapabilities
 {
     return TerminalCapabilities(false, false, 0, false);
 }
 
+/**
+ * Wrap `$text` in `$sgr` when `$color` is on.
+ *
+ * The closing sequence undoes that one attribute. An empty string is
+ * returned unchanged. With colour off, the text comes back bare.
+ */
 public function styled(const string& $text, const string& $sgr, bool $color) : string
 {
     if (!$color || $text->empty()) {
@@ -115,6 +138,7 @@ public function styled(const string& $text, const string& $sgr, bool $color) : s
  * Anything this library did not spell falls back to a full reset: it is the
  * one answer that is never wrong, only heavier than it needs to be.
  */
+#[docs::hidden]
 public function sgrOff(const string& $sgr) : string
 {
     if ($sgr == SGR_DIM || $sgr == SGR_BOLD) {
@@ -139,6 +163,9 @@ public function sgrOff(const string& $sgr) : string
     return SGR_RESET;
 }
 
+/**
+ * `auto`, `always`, or `never`. Anything else is null.
+ */
 public function colorNamed(const string& $word) : ColorChoice?
 {
     if ($word == 'auto') {
@@ -157,8 +184,12 @@ public function colorNamed(const string& $word) : ColorChoice?
 }
 
 /**
- * Resolve capabilities from facts the caller already has. Tests inject
- * tty/width/env rather than mutating the process.
+ * Resolve capabilities from facts the caller already has.
+ *
+ * `always` and `never` ignore the environment. `auto` turns colour off
+ * when `NO_COLOR` is set, on when `CLICOLOR_FORCE` is set to something
+ * other than `0`, off when `TERM` is `dumb`, and otherwise follows `$tty`.
+ * Unicode is on only for a terminal whose locale says so.
  */
 public function resolveFrom(
     ColorChoice $color,
@@ -197,6 +228,9 @@ public function resolveFrom(
     return TerminalCapabilities($useColor, $unicode, $cols, $tty);
 }
 
+/**
+ * `resolveFrom`, reading the stream, the locale, and the environment.
+ */
 public function resolve(ColorChoice $color, TerminalStream $stream) : TerminalCapabilities
 {
     std::io::stream $io = std::io::stderr;

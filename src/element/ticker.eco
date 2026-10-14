@@ -1,9 +1,5 @@
-/**
- * The tick loop Progress, Spinner and LogStream share. Paint stays on
- * the widget. This object is running, paused, or joined.
- *
- * Progress and Spinner tick every 80ms. A LogStream passes `$interval`
- * so a burst of pushes flushes on the same clock it was deferred by.
+/*
+ * The tick loop Progress, Spinner and LogStream share.
  */
 
 namespace command::element;
@@ -16,6 +12,12 @@ interface LiveTicks
 }
 
 #[atomic]
+/**
+ * The tick loop a live widget shares.
+ *
+ * Paint stays on the widget. This object is running, paused, or joined.
+ * Progress and Spinner tick every 80ms. A log window passes its own interval.
+ */
 public class Ticker
 {
     public thread::mutex<int32> $gate;
@@ -35,6 +37,9 @@ public class Ticker
         $this->period = 80;
     }
 
+    /**
+     * Mark the ticker running without starting a thread. A pipe does this.
+     */
     public function arm(string $who) : void
     {
         if ($this->running->load()) {
@@ -46,11 +51,17 @@ public class Ticker
         $this->hasWorker = false;
     }
 
+    /**
+     * Start the tick at the default period, 80ms.
+     */
     public function start(string $who, LiveTicks $host) : void
     {
         $this->start($who, $host, 80);
     }
 
+    /**
+     * Start the tick every `$ms` milliseconds.
+     */
     public function start(string $who, LiveTicks $host, int32 $ms) : void
     {
         if ($ms < 1) {
@@ -82,6 +93,9 @@ public class Ticker
         $this->hasWorker = true;
     }
 
+    /**
+     * Stop the tick and join the thread.
+     */
     public function halt() : void
     {
         if (!$this->running->load()) {
@@ -100,6 +114,9 @@ public class Ticker
         $this->worker = null;
     }
 
+    /**
+     * Stop painting, and keep the thread. `suspend` does this.
+     */
     public function pause() : void
     {
         $this->paused->store(true);

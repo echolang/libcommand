@@ -34,8 +34,7 @@ class Run
  *   │                        │
  *   ├────────────────────────╯
  *
- * Off-run there is no left edge to hang a box from, so it degrades to the
- * title and an indented body - which is the honest drawing of the same thing.
+ * Off a run, the same call draws the title and an indented body.
  *
  * A string is split on newlines. Several rows are an array.
  */

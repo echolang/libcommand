@@ -1,15 +1,21 @@
-/**
- * Why argv was refused.
- *
- * An enum, so `match` is the call site. Named cases are the ways this
- * parser refuses input. There is no leftover: the set is closed, and we
- * construct the case ourselves.
- *
- * The sentence comes from the case (`message()`, and `"{$e}"` via `str::from`).
+/*
+ * Why argv was refused. The sentence is `message()`, and `"{$e}"` via str::from.
  */
 
 namespace command;
 
+#[docs::see: ["command::renderError"]]
+/**
+ * Why argv was refused.
+ *
+ * An enum, so `match` is the call site. The set is closed: the parser
+ * constructs the case. `"{$e}"` is `message()`, through `str::from`.
+ *
+ * ```echo
+ * command::Error $e = $r->error ?? .noCommand;
+ * echo $e->message();
+ * ```
+ */
 public enum Error
 {
     case unknownCommand(string $word, string $list);
@@ -28,6 +34,9 @@ public enum Error
     case tooManyPositionals(string $who);
     case unexpectedSeparator(string $who);
 
+    /**
+     * The refusal, as one sentence.
+     */
     public const function message() : string
     {
         return match ($this) {

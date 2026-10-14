@@ -1,0 +1,34 @@
+/*
+ * libcommand's docs, built by ecodoc. From the repo root, `ecodoc build`
+ * writes the site to docs/dist.
+ */
+
+#[module: "docs"]
+
+#[docs::title: "libcommand"]
+#[docs::description: "argv, a help page that stays true, and a few things to draw."]
+#[docs::repo: "https://github.com/echolang/libcommand"]
+#[docs::edit: "https://github.com/echolang/libcommand/edit/master/docs/{path}"]
+#[docs::source: "https://github.com/echolang/libcommand/blob/master"]
+#[docs::nav: [
+    { text: "Guide", link: "/guide/" },
+    { text: "API", link: "/api/" },
+    { text: "Echo", link: "https://echoc.dev" }
+]]
+#[docs::sidebar: [{ base: "/guide/", items: [
+    { text: "Start", items: [
+        { text: "Getting started", link: "/guide/" },
+        { text: "The table", link: "/guide/command" },
+        { text: "Parsing", link: "/guide/parse" },
+        { text: "Help", link: "/guide/help" }
+    ] },
+    { text: "Drawing", items: [
+        { text: "The context", link: "/guide/context" },
+        { text: "Widgets", link: "/guide/widgets" },
+        { text: "Live lines", link: "/guide/live" },
+        { text: "Prompts", link: "/guide/prompts" },
+        { text: "A session", link: "/guide/session" }
+    ] }
+] }]]
+#[docs::api: { manifest: "../module.eco", visibility: public, autolink: true }]
+#[docs::footer: { message: "MIT. Built with ecodoc." }]

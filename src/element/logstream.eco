@@ -1,22 +1,5 @@
-/**
- * A window onto a stream of output, the way `docker build` shows a step:
- * only the last few rows, scrolling as new ones arrive.
- *
- *   $log = $ctx->create<LogStream>(6);
- *   $bar = $log->progress();
- *   $bar->start('compile', 42);
- *   $log->push('cc -O2 -c src/model.c');
- *   $bar->advance(1, 'model.o');
- *   $bar->finish();
- *
- * The window owns the whole frame. Dock a Spinner or Progress into a slot
- * of it (spinner above, bar below) instead of letting them rewrite their
- * own line. Two live things on one stream erase each other. This is how
- * they don't.
- *
- * Success collapses the window to the docked row. Failure keeps the tail
- * on screen, which is what you want to read when a build breaks. On a pipe
- * the rows stream through as plain lines and nothing is rewritten.
+/*
+ * A scrolling window of output, with a docked spinner or bar in the same frame.
  */
 
 namespace command::element;
@@ -36,6 +19,26 @@ enum Dock
 }
 
 #[atomic]
+#[docs::example: "examples/09-logstream.eco"]
+/**
+ * A window onto a stream of output: the last few rows, scrolling.
+ *
+ * The window owns the whole frame. Dock a spinner above it or a bar below
+ * it, instead of letting them rewrite their own line. Two live things on
+ * one stream erase each other. This is how they share it.
+ *
+ * `finish` and `succeed` collapse the window to the docked row. `fail`
+ * keeps the tail. On a pipe the rows stream through as plain lines.
+ *
+ * ```echo
+ * $log = $ctx->create<element::LogStream>(6);
+ * $bar = $log->progress();
+ * $bar->start('compile', 42);
+ * $log->push('cc -O2 -c src/model.c');
+ * $bar->advance(1, 'model.o');
+ * $bar->finish();
+ * ```
+ */
 public class LogStream : LiveTicks, LiveRow
 {
     public command::CLIContext $ctx;

@@ -1,8 +1,5 @@
-/**
+/*
  * A spinner that keeps moving while this thread is busy.
- *
- * The work stays here. The animation is the other thread. Join that thread
- * before the final commit, so the last line is not a race with the last paint.
  */
 
 namespace command::element;
@@ -10,6 +7,21 @@ namespace command::element;
 use std::thread;
 
 #[atomic]
+#[docs::example: "examples/05-live.eco"]
+/**
+ * A spinner that keeps moving while this thread is busy.
+ *
+ * The work stays here. The animation is the other thread. `succeed`,
+ * `fail` and `stop` join that thread before they write the last line.
+ * On a pipe, paint is silent and the finished call writes a full line.
+ *
+ * ```echo
+ * $s = $ctx->create<element::Spinner>();
+ * $s->start('fetching');
+ * $s->update('unpacking');
+ * $s->succeed('vendored 4 packages');
+ * ```
+ */
 public class Spinner : LiveTicks
 {
     public LiveRow $line;
@@ -36,11 +48,17 @@ public class Spinner : LiveTicks
         $this->stop();
     }
 
+    /**
+     * The channel this spinner draws on. A live run puts the glyph in the bar.
+     */
     public const function channel() : Stepper
     {
         return $this->ctx->channel();
     }
 
+    /**
+     * Paint the first frame and start the tick. On a pipe, arm it and wait.
+     */
     public function start(string $message) : void
     {
         if ($this->ticker->running->load()) {
@@ -60,29 +78,44 @@ public class Spinner : LiveTicks
         $this->ticker->start('command::element::Spinner', $this);
     }
 
+    /**
+     * Change the words. The glyph keeps cycling.
+     */
     public function update(string $message) : void
     {
         $this->setText($message);
     }
 
+    /**
+     * Join the tick and write one finished row.
+     */
     public function succeed(string $message) : void
     {
         $this->ticker->halt();
         $this->line->settle($this->finalRow(true, $message), true);
     }
 
+    /**
+     * Join the tick and write the row as a failure.
+     */
     public function fail(string $message) : void
     {
         $this->ticker->halt();
         $this->line->settle($this->finalRow(false, $message), false);
     }
 
+    /**
+     * Join the tick and erase the line.
+     */
     public function stop() : void
     {
         $this->ticker->halt();
         $this->line->erase();
     }
 
+    /**
+     * Pause the tick and erase the line, so something else can use the stream.
+     */
     public function suspend() : void
     {
         $this->ticker->pause();
@@ -145,6 +178,12 @@ public class Spinner : LiveTicks
     }
 }
 
+/**
+ * Run `$work` under a spinner labelled `$message`, and return what it returns.
+ *
+ * The finished row uses the same label. There is no other overload: the
+ * spinner is minted from `$ctx`, so a live session still joins the bar.
+ */
 public function spin<T>(
     command::CLIContext $ctx,
     string $message,

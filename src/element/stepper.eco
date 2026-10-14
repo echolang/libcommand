@@ -1,24 +1,12 @@
-/**
- * The channel down the left of a prompt, and the only thing that draws it.
- *
- * A Stepper with `gutter` on writes a connected run:
- *
- *   ┌  create-app
- *   │
- *   ◇  Where should we create it?
- *   │  ./my-app
- *
- * The same Stepper with `gutter` off writes two spaces and the row:
- *
- *   Where should we create it?
- *     ./my-app
- *
- * One renderer, two channels. An element sees neither; it hands over rows and
- * a Stepper decides how far left they start.
+/*
+ * The channel down the left of a prompt.
  */
 
 namespace command::element;
 
+/**
+ * Whether a step is waiting, answered, or failed.
+ */
 public enum StepState
 {
     case active;
@@ -26,6 +14,13 @@ public enum StepState
     case failed;
 }
 
+/**
+ * The channel down the left of a prompt, and the only thing that draws it.
+ *
+ * With `$gutter` on, a session writes a connected run. With it off, the
+ * same rows start two spaces in. An element hands over rows. The stepper
+ * decides how far left they start. Widgets pick the glyphs from unicode.
+ */
 public struct Stepper
 {
     public bool $gutter;

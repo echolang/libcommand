@@ -8,6 +8,7 @@
 
 namespace command;
 
+#[docs::hidden]
 public function stripSgr(const string& $text) : string
 {
     string $out = '';
@@ -62,6 +63,7 @@ function skipSgr(const string& $text, usize $i) : usize
  * survives the cut - which matters because every prompt row opens with one,
  * and a truncator that kept the tail instead would eat the gutter.
  */
+#[docs::hidden]
 public function fitHead(const string& $text, int32 $columns, const string& $ellipsis) : string
 {
     if ($columns <= 0) {
@@ -117,6 +119,7 @@ public function fitHead(const string& $text, int32 $columns, const string& $elli
     return $out;
 }
 
+#[docs::hidden]
 public function pageWidth(const TerminalCapabilities& $caps) : int32
 {
     if ($caps->width == 0) {
@@ -130,6 +133,7 @@ public function pageWidth(const TerminalCapabilities& $caps) : int32
     return $caps->width;
 }
 
+#[docs::hidden]
 public function liveWidth(const TerminalCapabilities& $caps) : int32
 {
     if ($caps->width == 0) {
@@ -146,6 +150,7 @@ public function liveWidth(const TerminalCapabilities& $caps) : int32
  * oracle for every prompt row, table cell and help row, so it runs tens of
  * times per repaint and has no business allocating to produce an integer.
  */
+#[docs::hidden]
 public function textWidth(const string& $s) : int32
 {
     return textWidth($s, $s->size());
@@ -156,6 +161,7 @@ public function textWidth(const string& $s) : int32
  * of it on every keystroke; measuring a prefix rather than a copy of one is
  * what keeps that from allocating.
  */
+#[docs::hidden]
 public function textWidth(const string& $s, usize $end) : int32
 {
     usize $limit = $end;
@@ -183,6 +189,7 @@ public function textWidth(const string& $s, usize $end) : int32
     return $col;
 }
 
+#[docs::hidden]
 public function spaces(int32 $n) : string
 {
     return repeatCell(' ', $n);
@@ -192,6 +199,7 @@ public function spaces(int32 $n) : string
  * `$cell` repeated `$n` times. Cells are counted, not columns - a box-drawing
  * glyph is one cell and one column, which is the only case anything repeats.
  */
+#[docs::hidden]
 public function repeatCell(const string& $cell, int32 $n) : string
 {
     if ($n <= 0) {
@@ -201,6 +209,7 @@ public function repeatCell(const string& $cell, int32 $n) : string
     return str::repeat($cell, usizeOf($n));
 }
 
+#[docs::hidden]
 public function writeHeading(
     Block& $out,
     const string& $text,
@@ -231,6 +240,7 @@ public function writeHeading(
     $out->push($line);
 }
 
+#[docs::hidden]
 public function writeRow(
     Block& $out,
     const string& $spelling,
@@ -315,6 +325,7 @@ public function writeRow(
     }
 }
 
+#[docs::hidden]
 public function writeWrapped(
     Block& $out,
     const string& $text,
@@ -325,6 +336,7 @@ public function writeWrapped(
     writeWrapped($out, linesOf($text), $indent, $caps);
 }
 
+#[docs::hidden]
 public function writeWrapped(
     Block& $out,
     const array<string>& $paragraphs,
@@ -419,6 +431,7 @@ function linesOf(const string& $text) : array<string>
  * The connector a value tree or a Tree widget hangs a child with.
  * `$last` picks `└─` / `` `- ``; the rest pick `├─` / `|- `.
  */
+#[docs::hidden]
 public function treeBranch(bool $last, bool $unicode) : string
 {
     TreeTheme $theme = treeTheme($unicode);

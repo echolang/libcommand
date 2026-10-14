@@ -1,14 +1,17 @@
-/**
- * argv → stated values. Nothing here is settled: --color auto is still the
+/*
+ * argv to stated values. Nothing here is settled: --color auto is still the
  * word "auto", and --help is an answer the driver draws, not an exit.
- *
- * The walk has a cursor, a word list and a filling Parsed. That state is a
- * Parser. Outcome still carries the partial parse on refusal, so a bad flag
- * still takes the colour the invocation asked for.
  */
 
 namespace command;
 
+/**
+ * The table, filled in as far as the walk got.
+ *
+ * `--color auto` is still the word `"auto"`. `--help` is a flag the driver
+ * draws, not an exit. On a refusal this is the partial parse, so the error
+ * page can still honour the colour the invocation asked for.
+ */
 public struct Parsed
 {
     public Subcommand $command;
@@ -20,7 +23,9 @@ public struct Parsed
     public bool $wantsVersion;
     public string $helpTopic;
 
-    /** The option the topic named, or -1 for no topic. */
+    /**
+     * The option the topic named, or -1 when help asked for the compact page.
+     */
     public int32 $helpTopicId;
     public array<bool> $stated;
     public array<string> $value;
@@ -42,26 +47,41 @@ public struct Parsed
         $this->repeated = array<array<string>>();
     }
 
+    /**
+     * Whether this invocation wrote the flag.
+     */
     public const function stated(Flag $f) : bool
     {
         return $this->stated[$f->id];
     }
 
+    /**
+     * Whether this invocation wrote the arg.
+     */
     public const function stated(Arg $a) : bool
     {
         return $this->stated[$a->id];
     }
 
+    /**
+     * The word for this arg, or its fallback when the invocation said nothing.
+     */
     public const function value(Arg $a) : string
     {
         return $this->value[$a->id];
     }
 
+    /**
+     * Every word a repeated arg collected, in order.
+     */
     public const function values(Arg $a) : array<string>
     {
         return $this->repeated[$a->id];
     }
 
+    /**
+     * The bit of the selected subcommand, or 0 when the walk never got one.
+     */
     public const function selectedBit() : int32
     {
         if ($this->hasCommand) {
@@ -71,6 +91,9 @@ public struct Parsed
         return 0;
     }
 
+    /**
+     * The command name, or the program name when no command was given.
+     */
     public const function subject(const Command& $app) : string
     {
         if (!$this->hasCommand) {
@@ -81,6 +104,12 @@ public struct Parsed
     }
 }
 
+/**
+ * What `parse` returns. `$error` is null when the parse is good.
+ *
+ * `$parsed` is filled either way. A refusal still carries the colour flag,
+ * the command, and whatever else the walk had already accepted.
+ */
 public struct Outcome
 {
     public Parsed $parsed;
@@ -448,6 +477,7 @@ class Parser
     }
 }
 
+#[docs::hidden]
 public function capabilitiesFor(
     const Parsed& $p,
     const Command& $app,

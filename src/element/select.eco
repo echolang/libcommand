@@ -1,19 +1,35 @@
-/**
- * A list the user picks from. Radio is one item; checks are many.
- * ask() always returns array<string>.
- *
- * Interactive: arrow keys, space to toggle checks, enter to confirm.
- * Otherwise a numbered list and a line of stdin.
+/*
+ * A list the user picks from. Radio is one item. Checks are many.
  */
 
 namespace command::element;
 
+/**
+ * One item, or many.
+ *
+ * `ask` returns `array<string>` either way. Radio is length 1.
+ */
 public enum SelectKind
 {
     case radio;
     case checks;
 }
 
+#[docs::example: "examples/06-prompts.eco"]
+/**
+ * A list the user picks from.
+ *
+ * On a terminal: arrow keys move, space toggles checks, enter confirms.
+ * On a pipe: a numbered list and a line. `2` is radio. `1,3` or `1 3`
+ * is checks. An empty line uses `pick` when one is set.
+ *
+ * ```echo
+ * $q = $ctx->create<element::Select>('Which features?', element::SelectKind::checks);
+ * $q->choice('Logging');
+ * $q->pick('Logging');
+ * array<string> $on = $q->ask();
+ * ```
+ */
 public class Select : Step
 {
     public command::CLIContext $ctx;
@@ -39,32 +55,50 @@ public class Select : Step
         $this->seat($ctx, $title, $kind);
     }
 
+    /**
+     * The channel this list draws on.
+     */
     public const function channel() : Stepper
     {
         return $this->ctx->channel();
     }
 
+    /**
+     * The title the channel draws for this step.
+     */
     public const function head() : string
     {
         return $this->title;
     }
 
+    /**
+     * The menu, while it is waiting.
+     */
     public const function body(const StepContext& $ctx) : array<string>
     {
         return selectRows($this, $ctx);
     }
 
+    /**
+     * The chosen labels, once the step has answered.
+     */
     public const function summary(const StepContext& $ctx) : array<string>
     {
         return summaryRows(collectPicks($this));
     }
 
+    /**
+     * Add one choice.
+     */
     public function choice(string $label) : void
     {
         $this->items[] = $label;
         $this->marked[] = false;
     }
 
+    /**
+     * Add every label.
+     */
     public function choices(array<string> $labels) : void
     {
         usize $i = 0;
@@ -75,6 +109,9 @@ public class Select : Step
         }
     }
 
+    /**
+     * How many rows the menu shows before it scrolls.
+     */
     public function pageSize(int32 $n) : void
     {
         if ($n < 1) {
@@ -85,16 +122,25 @@ public class Select : Step
         $this->ensureWindow();
     }
 
+    /**
+     * Whether the cursor leaves the last item and lands on the first.
+     */
     public function wrap(bool $on) : void
     {
         $this->wrapAround = $on;
     }
 
+    /**
+     * Whether confirm with nothing marked is a refusal. This starts on.
+     */
     public function require(bool $on) : void
     {
         $this->must = $on;
     }
 
+    /**
+     * The choice an empty line means, on a pipe.
+     */
     public function pick(string $label) : void
     {
         int32 $at = indexOf($this, $label);
@@ -123,6 +169,11 @@ public class Select : Step
         $this->ensureWindow();
     }
 
+    /**
+     * Draw the list and return the chosen labels.
+     *
+     * Radio is length 1. On a pipe this prints a numbered list and reads a line.
+     */
     public function ask() : array<string>
     {
         needItems($this);
@@ -140,11 +191,17 @@ public class Select : Step
         return askLine($this);
     }
 
+    /**
+     * Apply one key. True means the answer is settled.
+     */
     public function feed(const KeyEvent& $event) : bool
     {
         return $this->feed($event->key);
     }
 
+    /**
+     * `feed` for a key that carries no text.
+     */
     public function feed(Key $key) : bool
     {
         needItems($this);
@@ -164,6 +221,9 @@ public class Select : Step
         return false;
     }
 
+    /**
+     * Parse a pipe answer. Null when the line names nothing this list accepts.
+     */
     public function tryAnswer(const string& $line) : array<string>?
     {
         needItems($this);
@@ -179,6 +239,9 @@ public class Select : Step
         return $picked;
     }
 
+    /**
+     * Parse a pipe answer. A line this list does not accept dies.
+     */
     public function answer(const string& $line) : array<string>
     {
         array<string>? $got = $this->tryAnswer($line);
@@ -190,11 +253,17 @@ public class Select : Step
         return $got ?? array<string>();
     }
 
+    /**
+     * The labels currently marked.
+     */
     public function result() : array<string>
     {
         return collectPicks($this);
     }
 
+    /**
+     * The menu as the channel would draw it right now.
+     */
     public function frame() : command::Block
     {
         $this->ensureWindow();
@@ -202,6 +271,9 @@ public class Select : Step
         return stepFrame($this->channel(), $this, StepState::active);
     }
 
+    /**
+     * The numbered list a pipe prints.
+     */
     public function numbered() : command::Block
     {
         return drawNumbered($this);
@@ -233,6 +305,9 @@ public class Select : Step
      * window and draw from it - three expressions of one floor agree only
      * until one of them is edited.
      */
+    /**
+     * How many choice rows fit in the current page.
+     */
     public const function visible() : int32
     {
         if ($this->pageN < 1) {
@@ -242,6 +317,9 @@ public class Select : Step
         return $this->pageN;
     }
 
+    /**
+     * Slide the page so the cursor is on it.
+     */
     public function ensureWindow() : void
     {
         int32 $n = command::i32Of($this->items->count());
@@ -289,6 +367,9 @@ public class Select : Step
     }
 }
 
+/**
+ * Ask a radio list and return the one chosen label, in an array of length 1.
+ */
 public function select(
     command::CLIContext $ctx,
     string $title,
@@ -298,6 +379,9 @@ public function select(
     return select($ctx, $title, $choices, .radio);
 }
 
+/**
+ * Ask a list of `$kind` and return the chosen labels.
+ */
 public function select(
     command::CLIContext $ctx,
     string $title,

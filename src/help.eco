@@ -1,16 +1,20 @@
-/**
- * How an option is spelled back to a human. The page, one option, a usage
- * line, a refusal. Help is an answer and goes to stdout; a refusal is the
- * mirror and goes to stderr.
+/*
+ * The page, one option, a usage line, a refusal.
  */
 
 namespace command;
 
+/**
+ * The version string. The caller prints it and a newline.
+ */
 public function renderVersion(const Command& $app) : string
 {
     return $app->version;
 }
 
+/**
+ * The usage block, drawn for `$ctx`.
+ */
 public function renderUsage(
     const Command& $app,
     const Parsed& $p,
@@ -20,6 +24,9 @@ public function renderUsage(
     return renderUsage($app, $p, $ctx->caps);
 }
 
+/**
+ * The usage block, drawn for these capabilities.
+ */
 public function renderUsage(
     const Command& $app,
     const Parsed& $p,
@@ -33,6 +40,12 @@ public function renderUsage(
     return $out;
 }
 
+/**
+ * The refusal page: the sentence, then the usage.
+ *
+ * Help goes to stdout. This goes to stderr. Pass the context you resolved
+ * for that stream.
+ */
 public function renderError(
     Error $e,
     const Command& $app,
@@ -43,6 +56,9 @@ public function renderError(
     return renderError($e, $app, $p, $ctx->caps);
 }
 
+/**
+ * The refusal page, drawn for these capabilities.
+ */
 public function renderError(
     Error $e,
     const Command& $app,
@@ -69,6 +85,17 @@ public function renderError(
     return $out;
 }
 
+/**
+ * The help page for this parse.
+ *
+ * A `helpTopicId` of zero or more is that one option, named bare. Below
+ * zero is the compact page: one line per option.
+ *
+ * ```echo
+ * command::CLIContext $out = .from($parsed, $app, .stdout);
+ * $out->print(command::renderHelp($app, $parsed, $out));
+ * ```
+ */
 public function renderHelp(
     const Command& $app,
     const Parsed& $p,
@@ -78,6 +105,9 @@ public function renderHelp(
     return renderHelp($app, $p, $ctx->caps);
 }
 
+/**
+ * The help page, drawn for these capabilities.
+ */
 public function renderHelp(
     const Command& $app,
     const Parsed& $p,

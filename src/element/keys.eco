@@ -1,12 +1,15 @@
-/**
- * Keyboard bytes a prompt can act on. Arrow keys arrive as CSI, not as
- * letters, so this is a small decoder rather than readline.
- *
- * Tests feed complete sequences. The live path reads stdin in raw mode.
+/*
+ * Keyboard bytes a prompt can act on.
  */
 
 namespace command::element;
 
+/**
+ * A key a prompt can act on.
+ *
+ * Arrow keys arrive as CSI, not as letters. Tests feed complete sequences.
+ * The live path reads stdin in raw mode.
+ */
 public enum Key
 {
     case up;
@@ -88,16 +91,25 @@ class RawMode
     }
 }
 
+/**
+ * The key those bytes are. The text they carried is dropped.
+ */
 public function decodeKey(const string& $bytes) : Key
 {
     return decodeEvent($bytes)->key;
 }
 
+/**
+ * Read one keystroke from stdin, in raw mode.
+ */
 public function readKey() : Key
 {
     return readEvent()->key;
 }
 
+/**
+ * The key those bytes are, and the text when the key is `text` or space.
+ */
 public function decodeEvent(const string& $bytes) : KeyEvent
 {
     if ($bytes->empty()) {
@@ -141,6 +153,9 @@ public function decodeEvent(const string& $bytes) : KeyEvent
     return KeyEvent(Key::escape);
 }
 
+/**
+ * Read one keystroke from stdin and decode it.
+ */
 public function readEvent() : KeyEvent
 {
     int32 $first = command::command_read_byte();

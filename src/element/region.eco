@@ -1,21 +1,18 @@
-/**
- * A live block of more than one row. Selection prompts rewrite a menu.
- * A LogStream window is painted here. Progress and Spinner on their own
- * still use LiveLine (CR+EL, never cursor-up).
- *
- * Vocabulary is cursor-up and erase-down. The previous height is how far
- * to climb before the next paint.
- *
- * The terminal's own cursor is hidden for as long as a frame is on screen.
- * Widgets drawn here paint their caret into the frame (reverse video on
- * the scalar it sits on), and the real cursor, parked wherever the last
- * byte of the frame landed, would read as a second caret. It comes back
- * on commit, on erase, and if this region is dropped still hidden. The
- * shim brings it back on a signal.
+/*
+ * A live block of more than one row. Cursor-up, then erase-down.
  */
 
 namespace command::element;
 
+/**
+ * A live block of more than one row.
+ *
+ * A selection menu and a log window are painted here. The previous height
+ * is how far to climb before the next paint. The terminal cursor stays
+ * hidden while a frame is on screen, because the widget paints its own
+ * caret into the frame. It comes back on commit, on erase, and if this
+ * region is dropped still hidden.
+ */
 public class LiveRegion
 {
     public command::CLIContext $ctx;
@@ -36,6 +33,9 @@ public class LiveRegion
         }
     }
 
+    /**
+     * True when the stream is a terminal.
+     */
     public const function interactive() : bool
     {
         return $this->ctx->caps->interactive;
@@ -50,6 +50,9 @@ public class LiveRegion
         return $this->ctx->caps->interactive && stdinIsTty();
     }
 
+    /**
+     * Rewrite the block. The cursor climbs by the previous height first.
+     */
     public function paint(const command::Block& $block) : void
     {
         int32 $n = command::i32Of($block->rows->count());
@@ -74,6 +77,9 @@ public class LiveRegion
         $this->height = $n;
     }
 
+    /**
+     * Paint `$block` and leave it as finished rows. The cursor comes back.
+     */
     public function commit(const command::Block& $block) : void
     {
         if ($this->ctx->caps->interactive) {
@@ -90,6 +96,9 @@ public class LiveRegion
         $this->height = 0;
     }
 
+    /**
+     * Take the block off the screen and show the cursor.
+     */
     public function erase() : void
     {
         if (!$this->ctx->caps->interactive) {

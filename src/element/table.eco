@@ -1,10 +1,12 @@
-/**
- * A table of strings. Class because `create<T>` is a class constraint, and
- * the context it draws with is the one it was minted with.
+/*
+ * A table of strings. The context it draws with is the one it was minted with.
  */
 
 namespace command::element;
 
+/**
+ * One header cell.
+ */
 public struct Column
 {
     public string $header;
@@ -15,6 +17,22 @@ public struct Column
     }
 }
 
+#[docs::example: "examples/04-widgets.eco"]
+/**
+ * A table of strings.
+ *
+ * A class, because `create<T>` wants one, and the context it draws with
+ * is the one it was minted with. `$showHeader` and `$border` are fields.
+ * Both start on.
+ *
+ * ```echo
+ * $t = $ctx->create<element::Table>();
+ * $t->column('Feature');
+ * $t->column('Status');
+ * $t->row(['Help', 'ready']);
+ * $t->display();
+ * ```
+ */
 public class Table
 {
     public command::CLIContext $ctx;
@@ -34,6 +52,9 @@ public class Table
         $this->captured = command::Block();
     }
 
+    /**
+     * Add one column per header.
+     */
     public function columns(const array<string>& $headers) : void
     {
         foreach ($headers as $header) {
@@ -41,11 +62,19 @@ public class Table
         }
     }
 
+    /**
+     * Add one column.
+     */
     public function column(const string& $header) : void
     {
         $this->columns[] = Column($header);
     }
 
+    /**
+     * Append a row.
+     *
+     * A row longer than the columns dies. A short row leaves the rest empty.
+     */
     public function row(array<string> $cells) : void
     {
         if ($cells->count() > $this->columns->count()) {
@@ -55,11 +84,17 @@ public class Table
         $this->rows[] = $cells;
     }
 
+    /**
+     * The table as rows, for composing.
+     */
     public const function render() : command::Block
     {
         return renderTable($this, $this->ctx->caps);
     }
 
+    /**
+     * Write the table through the context it was minted with.
+     */
     public function display() : void
     {
         $page = $this->render();

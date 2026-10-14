@@ -1,6 +1,5 @@
-/**
- * A cooperative bar. The fill moves only when the caller says something
- * changed. The spinner is the other thread.
+/*
+ * A cooperative bar. The fill moves when the caller says something changed.
  */
 
 namespace command::element;
@@ -8,6 +7,21 @@ namespace command::element;
 use std::thread;
 
 #[atomic]
+#[docs::example: "examples/05-live.eco"]
+/**
+ * A cooperative bar.
+ *
+ * The fill moves only when you `advance` or `set`. A spinner on the row
+ * keeps moving until you `finish` or `fail`. On a pipe, paint is silent
+ * and the finished call writes a full line.
+ *
+ * ```echo
+ * $bar = $ctx->create<element::Progress>();
+ * $bar->start('compile', 42);
+ * $bar->advance(1, 'model.o');
+ * $bar->finish();
+ * ```
+ */
 public class Progress : LiveTicks
 {
     public LiveRow $line;
@@ -43,11 +57,17 @@ public class Progress : LiveTicks
         $this->line->erase();
     }
 
+    /**
+     * The channel this bar draws on.
+     */
     public const function channel() : Stepper
     {
         return $this->ctx->channel();
     }
 
+    /**
+     * Paint an empty bar of `$total` and start the tick.
+     */
     public function start(string $label, int32 $total) : void
     {
         if ($this->ticker->running->load()) {
@@ -65,16 +85,25 @@ public class Progress : LiveTicks
         $this->ticker->start('command::element::Progress', $this);
     }
 
+    /**
+     * Add `$n` to the count. An empty detail is fine.
+     */
     public function advance(int32 $n, string $detail) : void
     {
         $this->line->paint($this->lockedAdd($n, $detail));
     }
 
+    /**
+     * Set the count. An empty detail is fine.
+     */
     public function set(int32 $n, string $detail) : void
     {
         $this->line->paint($this->lockedApply($n, $detail));
     }
 
+    /**
+     * Fill the bar and write the finished row.
+     */
     public function finish() : void
     {
         $this->ticker->halt();
@@ -86,12 +115,18 @@ public class Progress : LiveTicks
         $this->commitFinal(true);
     }
 
+    /**
+     * Write the row as a failure, at the count you had reached.
+     */
     public function fail() : void
     {
         $this->ticker->halt();
         $this->commitFinal(false);
     }
 
+    /**
+     * Pause the tick and erase the line, so something else can use the stream.
+     */
     public function suspend() : void
     {
         $this->ticker->pause();
