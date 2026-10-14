@@ -24,10 +24,24 @@
     ] },
     { text: "Drawing", items: [
         { text: "The context", link: "/guide/context" },
-        { text: "Widgets", link: "/guide/widgets" },
-        { text: "Live lines", link: "/guide/live" },
-        { text: "Prompts", link: "/guide/prompts" },
         { text: "A session", link: "/guide/session" }
+    ] },
+    { text: "Widgets", items: [
+        { text: "Overview", link: "/guide/widgets" },
+        { text: "Table", link: "/guide/table" },
+        { text: "Tree", link: "/guide/tree" }
+    ] },
+    { text: "Live", items: [
+        { text: "Overview", link: "/guide/live" },
+        { text: "Spinner", link: "/guide/spinner" },
+        { text: "Progress", link: "/guide/progress" },
+        { text: "LogStream", link: "/guide/logstream" }
+    ] },
+    { text: "Prompts", items: [
+        { text: "Overview", link: "/guide/prompts" },
+        { text: "Select", link: "/guide/select" },
+        { text: "Text", link: "/guide/text" },
+        { text: "Confirm", link: "/guide/confirm" }
     ] }
 ] }]]
 #[docs::api: { manifest: "../module.eco", visibility: public, autolink: true }]

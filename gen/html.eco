@@ -1,0 +1,311 @@
+/*
+ * SGR rows to HTML, for the renderings in the guide.
+ *
+ * The page is a dark code surface in both site themes, so the palette is
+ * fixed rather than following the site's own tokens.
+ */
+
+use command;
+
+/**
+ * The attributes a run of text is drawn with. Colour, weight and reverse
+ * close apart, the same way `command::sgrOff` closes them.
+ */
+struct Pen
+{
+    public int32 $color;
+    public int32 $weight;
+    public bool $reverse;
+
+    constructor()
+    {
+        $this->color = 0;
+        $this->weight = 0;
+        $this->reverse = false;
+    }
+
+    const function plain() : bool
+    {
+        return $this->color == 0 && $this->weight == 0 && !$this->reverse;
+    }
+
+    /**
+     * Apply one SGR parameter. Anything this library never writes is ignored.
+     */
+    function apply(int32 $code) : void
+    {
+        if ($code == 0) {
+            $this->color = 0;
+            $this->weight = 0;
+            $this->reverse = false;
+            return;
+        }
+
+        if ($code == 1 || $code == 2) {
+            $this->weight = $code;
+            return;
+        }
+
+        if ($code == 22) {
+            $this->weight = 0;
+            return;
+        }
+
+        if ($code == 7) {
+            $this->reverse = true;
+            return;
+        }
+
+        if ($code == 27) {
+            $this->reverse = false;
+            return;
+        }
+
+        if ($code == 39) {
+            $this->color = 0;
+            return;
+        }
+
+        if (($code >= 30 && $code <= 37) || ($code >= 90 && $code <= 97)) {
+            $this->color = $code;
+        }
+    }
+
+    const function style() : string
+    {
+        string $fg = paletteOf($this->color);
+        string $css = '';
+
+        if ($this->reverse) {
+            if ($fg->empty()) {
+                $fg = FOREGROUND;
+            }
+
+            $css->append("background:{$fg};color:");
+            $css->append(BACKGROUND_INK);
+        } else if (!$fg->empty()) {
+            $css->append("color:{$fg}");
+        }
+
+        if ($this->weight == 1) {
+            if (!$css->empty()) {
+                $css->append(';');
+            }
+
+            $css->append('font-weight:700');
+        }
+
+        if ($this->weight == 2) {
+            if (!$css->empty()) {
+                $css->append(';');
+            }
+
+            $css->append('opacity:.55');
+        }
+
+        return $css;
+    }
+}
+
+const FOREGROUND = '#e6edf5';
+const BACKGROUND_INK = '#0a0e15';
+
+/**
+ * A readable dark-terminal palette. Bright black is a grey you can see, not
+ * the background colour some schemes paint it in.
+ */
+function paletteOf(int32 $code) : string
+{
+    if ($code == 31) {
+        return '#ff7b72';
+    }
+
+    if ($code == 32) {
+        return '#7ee787';
+    }
+
+    if ($code == 33) {
+        return '#e3b341';
+    }
+
+    if ($code == 34) {
+        return '#79c0ff';
+    }
+
+    if ($code == 35) {
+        return '#d2a8ff';
+    }
+
+    if ($code == 36) {
+        return '#56d4dd';
+    }
+
+    if ($code == 37) {
+        return '#e6edf5';
+    }
+
+    if ($code == 90) {
+        return '#7d8590';
+    }
+
+    return '';
+}
+
+/**
+ * Append `$b` to `$out`, escaped for HTML text.
+ */
+function escapeByte(uint8 $b, string& $out) : void
+{
+    if ($b == 38) {
+        $out->append('&amp;');
+        return;
+    }
+
+    if ($b == 60) {
+        $out->append('&lt;');
+        return;
+    }
+
+    if ($b == 62) {
+        $out->append('&gt;');
+        return;
+    }
+
+    $out->push($b);
+}
+
+/**
+ * Read the SGR sequence at `$i` (an ESC) into `$pen`. Returns the index just
+ * past it. A sequence that is not SGR is skipped whole.
+ */
+function readSgr(const string& $row, usize $i, Pen& $pen) : usize
+{
+    usize $at = $i + 1;
+
+    if ($at >= $row->size() || $row->byte($at) != command::CH_LBRK) {
+        return $at;
+    }
+
+    $at = $at + 1;
+    array<int32> $codes = array<int32>();
+    int32 $n = 0;
+    bool $digits = false;
+
+    while ($at < $row->size()) {
+        uint8 $b = $row->byte($at);
+        $at = $at + 1;
+
+        if ($b >= 48 && $b <= 57) {
+            $n = $n * 10 + (($b - 48) as int32);
+            $digits = true;
+            continue;
+        }
+
+        if ($b == 59) {
+            $codes[] = $n;
+            $n = 0;
+            $digits = false;
+            continue;
+        }
+
+        if ($b == 109) {
+            if ($digits || $codes->empty()) {
+                $codes[] = $n;
+            }
+
+            foreach ($codes as $code) {
+                $pen->apply($code);
+            }
+        }
+
+        break;
+    }
+
+    return $at;
+}
+
+function openSpan(const Pen& $pen, string& $out) : void
+{
+    string $css = $pen->style();
+    $out->append("<span style=\"{$css}\">");
+}
+
+/**
+ * One row as HTML. Every span closes before the row ends, so a row is whole
+ * on its own line.
+ */
+function rowHtml(const string& $row, Pen& $pen) : string
+{
+    string $out = '';
+    bool $open = false;
+
+    if (!$pen->plain()) {
+        openSpan($pen, $out);
+        $open = true;
+    }
+
+    usize $i = 0;
+
+    while ($i < $row->size()) {
+        uint8 $b = $row->byte($i);
+
+        if ($b != command::CH_ESC) {
+            escapeByte($b, $out);
+            $i = $i + 1;
+            continue;
+        }
+
+        $i = readSgr($row, $i, $pen);
+
+        if ($open) {
+            $out->append('</span>');
+            $open = false;
+        }
+
+        if (!$pen->plain()) {
+            openSpan($pen, $out);
+            $open = true;
+        }
+    }
+
+    if ($open) {
+        $out->append('</span>');
+    }
+
+    return $out;
+}
+
+/**
+ * A block as a terminal window for the guide: ecodoc's code surface, a
+ * header that says this is output, and one line per row.
+ *
+ * No line of it is ever blank. A blank line would end the HTML block and
+ * hand the rest to markdown.
+ */
+function htmlOf(const command::Block& $block) : string
+{
+    string $out = '<div class="code surface" data-lang="terminal">';
+    $out->append('<div class="code-head"><span class="code-file"><span class="dot"></span>terminal</span></div>');
+    // a terminal's rows touch, so box drawing joins from one row to the next.
+    // the site's code line height leaves a gap between every rule and bar.
+    // one font for every glyph: the site's mono has no box drawing, and a
+    // fallback with a different advance walks the right border out of line
+    $out->append('<pre class="code-body"><code style="font-family:Menlo,Consolas,&quot;DejaVu Sans Mono&quot;,monospace;line-height:1.2;color:');
+    $out->append(FOREGROUND);
+    $out->append('">');
+    Pen $pen = Pen();
+
+    foreach ($block->rows as $i => $row) {
+        if ($i > 0) {
+            $out->append("\n");
+        }
+
+        $out->append('<span class="line">');
+        $out->append(rowHtml($row, $pen));
+        $out->append('</span>');
+    }
+
+    $out->append('</code></pre></div>');
+
+    return $out;
+}

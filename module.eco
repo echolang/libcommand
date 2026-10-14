@@ -18,6 +18,11 @@
 #[end]
 #[sources: "src/**/*.eco"]
 
+// the colour renderings in the guide. see gen/main.eco
+#[target: exe { name: "render", entry: "gen/main.eco" }] {
+    #[sources: "gen/*.eco"]
+}
+
 #[target: test] {
     #[sources: "tests/**/*.eco"]
 }

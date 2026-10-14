@@ -1,5 +1,5 @@
 ---
-description: Table and Tree. A program that only wants one of them never names Command.
+description: How a widget is minted, how it leaves, and why the glyphs are a unicode question.
 ---
 
 # Widgets
@@ -19,37 +19,36 @@ $t->row(['Help', 'ready']);
 $t->display();
 ```
 
-`create<T>` is a constructor call on T, with the context already in its hand. `$t->display()` writes through that context, so the stream and the colour decision were made once at `resolve` or `from`.
+`create<T>` is a constructor call on T, with the context already in its hand. `$t->display()` writes through that context, so the stream and the colour decision were made once, at `resolve` or `from`.
 
-`Table` and `Tree` also have `render()`, which returns the page as a [](api:command::Block) if you are composing. `display()` is how a widget leaves. In a `buffer` context, `display` records the block instead of writing it.
+There are three kinds, and each has its own page:
 
-`examples/04-widgets.eco` draws both.
+- **Pages you draw once.** A [Table](./table.md) and a [Tree](./tree.md). Build it, `display()` it, done.
+- **Live lines.** A [Spinner](./spinner.md), a [Progress](./progress.md) bar, and the [LogStream](./logstream.md) window they can sit in. They keep repainting until you finish them. [Live lines](./live.md) is what they share.
+- **Prompts.** A [Select](./select.md), a [Text](./text.md), a [Confirm](./confirm.md). They draw, read keys, and return an answer. [Prompts](./prompts.md) is what they share.
 
-## A table
+## display and render
 
-`$showHeader` and `$border` are public fields, not setters. Both start on. `columns` takes the headers in one array. `column` adds one.
+`Table` and `Tree` also have `render()`, which returns the page as a [](api:command::Block) if you are composing. `display()` is how a widget leaves.
 
-```echo
-$t->columns(['Feature', 'Status']);
-$t->row(['Help', 'ready']);
-$t->showHeader = true;
-$t->border = false;
-```
+In a `buffer` context, `display` records the block on the widget's `$captured` instead of writing it. That's how the tests read a table back without a terminal.
 
-Here is the catch: `row()` dies if the row is longer than the columns. A short row is fine. The missing cells stay empty.
+## Glyphs are a unicode question
 
-The border glyphs come from the unicode theme when the context has unicode, and from `+`, `-`, `|` when it does not. Colour is not part of that choice.
+Colour and unicode fail apart. A CI log can render SGR and still choke on box drawing, and a golden test wants the unicode layout with colour off. So the glyphs come from the unicode setting, and colour is decided separately.
 
-## A tree
+Here is the [table](./table.md) on a terminal with colour and no unicode:
 
-A `Tree` is labels, and you build it by pushing into `$node->children[]`.
+<!-- render: table-ascii -->
+<div class="code surface" data-lang="terminal"><div class="code-head"><span class="code-file"><span class="dot"></span>terminal</span></div><pre class="code-body"><code style="font-family:Menlo,Consolas,&quot;DejaVu Sans Mono&quot;,monospace;line-height:1.2;color:#e6edf5"><span class="line">+------------+---------+--------+</span>
+<span class="line">| <span style="font-weight:700">Package</span>    | <span style="font-weight:700">Version</span> | <span style="font-weight:700">Status</span> |</span>
+<span class="line">+------------+---------+--------+</span>
+<span class="line">| libcommand | 0.1.3   | ready  |</span>
+<span class="line">| libjson    | 0.4.0   | ready  |</span>
+<span class="line">| libhttp    | 0.2.1   |        |</span>
+<span class="line">+------------+---------+--------+</span></code></pre></div>
+<!-- /render -->
 
-```echo
-$tree = $ctx->create<element::Tree>('root');
-element::Node $src = element::Node('src');
-$src->children[] = element::Node('main.eco');
-$tree->root->children[] = $src;
-$tree->display();
-```
+Same columns, same bold header, `+`, `-` and `|` for the border. Every widget has an ascii set, and each widget page says what it is.
 
-The constructor argument is the root label. `render` walks `$root` and the children you pushed. The branch glyphs are `├─` and `└─` when unicode is on. Without unicode they are `|-` and a backtick followed by `-`. Same rule as the table: the theme is a unicode question, and colour is a different one.
+`examples/04-widgets.eco` draws a table and a tree.

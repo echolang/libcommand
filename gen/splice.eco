@@ -1,0 +1,79 @@
+/*
+ * Swapping a rendering into a page, between its two markers.
+ */
+
+use command;
+
+const MARK_OPEN = '<!-- render: ';
+const MARK_SHUT = '<!-- /render -->';
+
+/**
+ * The sample a marker line names, or empty when the line is no marker.
+ */
+function markerName(const string& $line) : string
+{
+    string $t = str::trim($line);
+
+    if (!$t->starts(MARK_OPEN) || !$t->ends(' -->')) {
+        return '';
+    }
+
+    usize $from = MARK_OPEN->size();
+
+    return str::trim($t->sub($from, $t->size() - $from - 4));
+}
+
+/**
+ * `$text` with every rendering redrawn. The names it met land in `$used`.
+ * A marker that names no sample, or never closes, dies.
+ */
+function spliced(const string& $page, const string& $text, array<string>& $used) : string
+{
+    array<string> $lines = command::linesOf($text);
+    array<string> $out = array<string>();
+    usize $i = 0;
+
+    while ($i < $lines->count()) {
+        string $line = $lines[$i];
+        string $name = markerName($line);
+        $out[] = $line;
+        $i = $i + 1;
+
+        if ($name->empty()) {
+            continue;
+        }
+
+        command::Block $block = guard sampleNamed($name) else {
+            die("render: {$page} names no sample '{$name}'");
+        }
+
+        while ($i < $lines->count() && str::trim($lines[$i]) != MARK_SHUT) {
+            $i = $i + 1;
+        }
+
+        if ($i >= $lines->count()) {
+            die("render: {$page}: '{$name}' is never closed");
+        }
+
+        $out[] = htmlOf($block);
+        $out[] = $lines[$i];
+        $i = $i + 1;
+
+        if (!listed($used, $name)) {
+            $used[] = $name;
+        }
+    }
+
+    return str::join($out, "\n");
+}
+
+function listed(const array<string>& $names, const string& $name) : bool
+{
+    foreach ($names as $n) {
+        if ($n == $name) {
+            return true;
+        }
+    }
+
+    return false;
+}

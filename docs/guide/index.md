@@ -79,4 +79,11 @@ The table itself is [the next page](./command.md). The four branches, and what a
 
 ## This site
 
-The pages you are reading are this repo's `docs/` folder, built by [ecodoc](https://github.com/echolang/ecodoc). The workflow that publishes them is `.github/workflows/docs.yml`. One setting lives in the repository, not in git: Settings, Pages, Source: GitHub Actions.
+The pages you are reading are this repo's `docs/` folder, built by [ecodoc](https://github.com/echolang/ecodoc). The workflow that publishes them is `.github/workflows/docs.yml`.
+
+The coloured terminal windows on the widget pages are not screenshots. `gen/` is a small program in this module that draws every widget into a buffer context and pastes the HTML between the `<!-- render: ... -->` markers. Change how a widget looks, then run it again. `--check` writes nothing and exits 1 when a page is out of date.
+
+```bash
+echoc run --target render
+echoc run --target render -- --check
+``` One setting lives in the repository, not in git: Settings, Pages, Source: GitHub Actions.

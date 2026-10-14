@@ -1,0 +1,62 @@
+// fills every `<!-- render: NAME -->` marker in the guide with the HTML of
+// that sample, drawn by the widgets themselves
+//
+//   echoc run --target render
+//   echoc run --target render -- --check
+
+use command;
+use std::env;
+use std::io;
+
+array<string> $pages = [
+    'docs/guide/widgets.md', 'docs/guide/table.md', 'docs/guide/tree.md',
+    'docs/guide/live.md', 'docs/guide/spinner.md', 'docs/guide/progress.md', 'docs/guide/logstream.md',
+    'docs/guide/prompts.md', 'docs/guide/select.md', 'docs/guide/text.md', 'docs/guide/confirm.md',
+    'docs/guide/session.md',
+];
+
+bool $check = false;
+
+foreach (env::argv() as $arg) {
+    if ($arg == '--check') {
+        $check = true;
+    }
+}
+
+array<string> $used = array<string>();
+int32 $stale = 0;
+
+foreach ($pages as $page) {
+    string $text = guard io::readfile($page) else ($e) {
+        die("render: cannot read {$page}: {$e->message()}");
+    }
+
+    string $next = spliced($page, $text, $used);
+
+    if ($next == $text) {
+        continue;
+    }
+
+    $stale = $stale + 1;
+
+    if ($check) {
+        echo "stale: {$page}";
+        continue;
+    }
+
+    guard io::writefile($page, $next) else ($e) {
+        die("render: cannot write {$page}: {$e->message()}");
+    }
+
+    echo "rendered: {$page}";
+}
+
+foreach (sampleNames() as $name) {
+    if (!listed($used, $name)) {
+        die("render: no page uses the sample '{$name}'");
+    }
+}
+
+if ($check && $stale > 0) {
+    env::exit(1);
+}

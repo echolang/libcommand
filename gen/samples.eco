@@ -1,0 +1,429 @@
+/*
+ * Every rendering in the guide, drawn by the widgets themselves.
+ *
+ * Each sample draws on a buffer context, so nothing touches the host tty.
+ * Live widgets are frozen at one frame by setting their state and asking
+ * for the row they would paint. No tick ever starts.
+ */
+
+use command;
+use command::element;
+
+/**
+ * Colour, unicode, a 64-column terminal. Narrow enough that a rendering
+ * fits the guide's code window without scrolling.
+ */
+function term() : command::CLIContext
+{
+    return .buffer(command::TerminalCapabilities(true, true, 64, true));
+}
+
+function asciiTerm() : command::CLIContext
+{
+    return .buffer(command::TerminalCapabilities(true, false, 64, true));
+}
+
+/**
+ * The block for the sample `$name`, or null when there is no such sample.
+ */
+function sampleNamed(const string& $name) : command::Block?
+{
+    if ($name == 'table') {
+        return tableSample(term(), true);
+    }
+
+    if ($name == 'table-borderless') {
+        return tableSample(term(), false);
+    }
+
+    if ($name == 'table-ascii') {
+        return tableSample(asciiTerm(), true);
+    }
+
+    if ($name == 'tree') {
+        return treeSample(term());
+    }
+
+    if ($name == 'tree-ascii') {
+        return treeSample(asciiTerm());
+    }
+
+    if ($name == 'spinner') {
+        return spinnerSample();
+    }
+
+    if ($name == 'spinner-done') {
+        return spinnerDoneSample();
+    }
+
+    if ($name == 'progress') {
+        return progressSample();
+    }
+
+    if ($name == 'progress-done') {
+        return progressDoneSample();
+    }
+
+    if ($name == 'logstream') {
+        return logBarSample();
+    }
+
+    if ($name == 'logstream-spinner') {
+        return logSpinnerSample();
+    }
+
+    if ($name == 'logstream-failed') {
+        return logFailedSample();
+    }
+
+    if ($name == 'select-radio') {
+        return radioSample();
+    }
+
+    if ($name == 'select-checks') {
+        return checksSample();
+    }
+
+    if ($name == 'select-done') {
+        return checksDoneSample();
+    }
+
+    if ($name == 'select-pipe') {
+        return pipeSample();
+    }
+
+    if ($name == 'text-hint') {
+        return textHintSample();
+    }
+
+    if ($name == 'text-typed') {
+        return textTypedSample();
+    }
+
+    if ($name == 'text-done') {
+        return textDoneSample();
+    }
+
+    if ($name == 'confirm') {
+        return confirmSample();
+    }
+
+    if ($name == 'confirm-words') {
+        return confirmWordsSample();
+    }
+
+    if ($name == 'session') {
+        return sessionLiveSample();
+    }
+
+    if ($name == 'session-done') {
+        return sessionDoneSample();
+    }
+
+    return null;
+}
+
+/**
+ * Every name `sampleNamed` answers. A sample no page uses is an error, the
+ * same as a marker that names no sample.
+ */
+function sampleNames() : array<string>
+{
+    array<string> $names = [
+        'table', 'table-borderless', 'table-ascii', 'tree', 'tree-ascii',
+        'spinner', 'spinner-done', 'progress', 'progress-done',
+        'logstream', 'logstream-spinner', 'logstream-failed',
+        'select-radio', 'select-checks', 'select-done', 'select-pipe',
+        'text-hint', 'text-typed', 'text-done',
+        'confirm', 'confirm-words',
+        'session', 'session-done',
+    ];
+
+    return $names;
+}
+
+function tableSample(command::CLIContext $ctx, bool $border) : command::Block
+{
+    $t = $ctx->create<element::Table>();
+    $t->columns(['Package', 'Version', 'Status']);
+    $t->row(['libcommand', '0.1.3', 'ready']);
+    $t->row(['libjson', '0.4.0', 'ready']);
+    $t->row(['libhttp', '0.2.1']);
+    $t->border = $border;
+
+    return $t->render();
+}
+
+function treeSample(command::CLIContext $ctx) : command::Block
+{
+    $tree = $ctx->create<element::Tree>('libcommand');
+    element::Node $src = element::Node('src');
+    element::Node $el = element::Node('element');
+    $el->children[] = element::Node('table.eco');
+    $el->children[] = element::Node('tree.eco');
+    $src->children[] = $el;
+    $src->children[] = element::Node('parse.eco');
+    $tree->root->children[] = $src;
+    $tree->root->children[] = element::Node('module.eco');
+
+    return $tree->render();
+}
+
+function spinnerSample() : command::Block
+{
+    element::Spinner $s = element::Spinner(term());
+    $s->frame = 2;
+
+    return command::Block($s->spinRow('fetching echolang/libjson'));
+}
+
+function spinnerDoneSample() : command::Block
+{
+    element::Spinner $s = element::Spinner(term());
+    $out = command::Block($s->finalRow(true, 'vendored 4 packages'));
+    $out->push($s->finalRow(false, 'mirror refused the connection'));
+
+    return $out;
+}
+
+/**
+ * A bar frozen at `$current` of `$total`, without starting it: `start`
+ * would spawn the tick.
+ */
+function bar(element::Progress $p, const string& $label, int32 $current, int32 $total, const string& $detail) : void
+{
+    $p->label = $label;
+    $p->current = $current;
+    $p->total = $total;
+    $p->detail = $detail;
+    $p->frame = 4;
+}
+
+function progressSample() : command::Block
+{
+    element::Progress $p = element::Progress(term());
+    bar($p, 'compile', 27, 42, 'model.o');
+
+    return command::Block($p->runningRow());
+}
+
+function progressDoneSample() : command::Block
+{
+    command::SpinnerTheme $spin = command::spinnerTheme(true);
+    element::Progress $done = element::Progress(term());
+    bar($done, 'compile', 42, 42, '');
+    element::Progress $broke = element::Progress(term());
+    bar($broke, 'download', 3, 8, 'codec.tar.gz');
+
+    $out = command::Block($done->drawRow($spin->outcome(true), command::outcomeSgr(true)));
+    $out->push($broke->drawRow($spin->outcome(false), command::outcomeSgr(false)));
+
+    return $out;
+}
+
+/**
+ * A window that paints every push and never starts its tick.
+ */
+function logWindow(command::CLIContext $ctx, int32 $lines) : element::LogStream
+{
+    element::LogStream $log = element::LogStream($ctx, $lines);
+    $log->interval = 0;
+
+    return $log;
+}
+
+function logBarSample() : command::Block
+{
+    element::LogStream $log = logWindow(term(), 4);
+    element::Progress $bar = $log->progress();
+    bar($bar, 'compile', 5, 8, 'codec.o');
+    $log->push('cc -O2 -c src/model.c -o build/model.o');
+    $log->push('  note: model.c: 0 warnings');
+    $log->push('cc -O2 -c src/codec.c -o build/codec.o');
+    $log->push('  note: codec.c: 0 warnings');
+
+    return $log->frame($bar->runningRow());
+}
+
+function logSpinnerSample() : command::Block
+{
+    command::CLIContext $ctx = term();
+    element::LogStream $log = logWindow($ctx, 4);
+    element::Spinner $spin = $log->spinner();
+    $spin->frame = 5;
+    $log->push('Step 2/4 : RUN apk add --no-cache build-base');
+    $log->print('cached  FROM alpine:3.20');
+    $log->push('(4/12) Installing gmp (6.3.0-r1)');
+    $log->push('(5/12) Installing gcc (13.2.1_git20240309-r0)');
+    $log->push('(6/12) Installing musl-dev (1.2.5-r0)');
+
+    $out = command::Block($ctx->page->rows);
+    $out->extend($log->frame($spin->spinRow('building image')));
+
+    return $out;
+}
+
+function logFailedSample() : command::Block
+{
+    element::LogStream $log = logWindow(term(), 4);
+    element::Progress $bar = $log->progress();
+    bar($bar, 'link', 1, 3, 'app');
+    $log->push('ld -o build/app build/*.o');
+    $log->push("ld: undefined symbol 'tensor_free'");
+    $log->push('  referenced from build/trainer.o');
+    $log->push('error: linker command failed with exit code 1');
+
+    command::SpinnerTheme $spin = command::spinnerTheme(true);
+
+    return $log->frame($bar->drawRow($spin->outcome(false), command::outcomeSgr(false)));
+}
+
+function fruits(command::CLIContext $ctx) : element::Select
+{
+    element::Select $q = element::Select($ctx, 'Pick a fruit');
+    $q->choices(['Apple', 'Banana', 'Orange']);
+
+    return $q;
+}
+
+function radioSample() : command::Block
+{
+    element::Select $q = fruits(term());
+    $q->feed(element::Key::down);
+
+    return $q->frame();
+}
+
+function features(command::CLIContext $ctx) : element::Select
+{
+    element::Select $q = element::Select($ctx, 'Which features?', element::SelectKind::checks);
+    $q->choices(['Logging', 'Caching', 'Compression', 'Metrics']);
+    $q->pick('Logging');
+    $q->feed(element::Key::down);
+    $q->feed(element::Key::down);
+    $q->feed(element::Key::space);
+
+    return $q;
+}
+
+function checksSample() : command::Block
+{
+    element::Select $q = features(term());
+    $q->feed(element::Key::down);
+
+    return $q->frame();
+}
+
+function checksDoneSample() : command::Block
+{
+    element::Select $q = features(term());
+
+    return element::stepSummary($q->channel(), $q);
+}
+
+function pipeSample() : command::Block
+{
+    element::Select $q = fruits(.buffer(command::TerminalCapabilities(false, false, 64, false)));
+
+    return $q->numbered();
+}
+
+function where(command::CLIContext $ctx) : element::Text
+{
+    element::Text $p = element::Text($ctx, 'Where should we create it?');
+    $p->hint('./my-app');
+    $p->otherwise('./my-app');
+
+    return $p;
+}
+
+function textHintSample() : command::Block
+{
+    return where(term())->frame();
+}
+
+function textTypedSample() : command::Block
+{
+    element::Text $p = where(term());
+    $p->type('./tools/cli');
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::left);
+    $p->feed(element::Key::left);
+
+    return $p->frame();
+}
+
+function textDoneSample() : command::Block
+{
+    element::Text $p = where(term());
+    $p->type('./tools/cli');
+
+    return element::stepSummary($p->channel(), $p);
+}
+
+function confirmSample() : command::Block
+{
+    element::Confirm $c = element::Confirm(term(), 'Continue?');
+
+    return $c->frame();
+}
+
+function confirmWordsSample() : command::Block
+{
+    element::Confirm $c = element::Confirm(term(), 'Overwrite ./my-app?');
+    $c->words('overwrite', 'keep');
+    $c->feed(element::Key::right);
+
+    $out = $c->frame();
+    $out->extend(element::stepSummary($c->channel(), $c));
+
+    return $out;
+}
+
+function sessionLiveSample() : command::Block
+{
+    command::CLIContext $ctx = term();
+    $ctx->beginStepper('create-app');
+
+    element::Text $dir = where($ctx);
+    $ctx->gap();
+    $ctx->print(element::stepSummary($ctx->channel(), $dir));
+
+    element::Select $type = element::Select($ctx, 'Pick a project type');
+    $type->choices(['TypeScript', 'JavaScript', 'Echo']);
+    $ctx->gap();
+    $ctx->print($type->frame());
+
+    return command::Block($ctx->page->rows);
+}
+
+function sessionDoneSample() : command::Block
+{
+    command::CLIContext $ctx = term();
+    $ctx->beginStepper('create-app');
+
+    element::Text $dir = where($ctx);
+    $ctx->gap();
+    $ctx->print(element::stepSummary($ctx->channel(), $dir));
+
+    element::Select $type = element::Select($ctx, 'Pick a project type');
+    $type->choices(['TypeScript', 'JavaScript', 'Echo']);
+    $type->feed(element::Key::end);
+    $ctx->gap();
+    $ctx->print(element::stepSummary($ctx->channel(), $type));
+
+    $ctx->gap();
+    $ctx->print(element::noteFrame($ctx->channel(), 'Heads up', 'This overwrites ./my-app'));
+
+    element::Confirm $go = element::Confirm($ctx, 'Continue?');
+    $ctx->gap();
+    $ctx->print(element::stepSummary($ctx->channel(), $go));
+
+    element::Spinner $spin = element::Spinner($ctx);
+    $ctx->gap();
+    $ctx->line($spin->finalRow(true, 'wrote 12 files'));
+
+    $ctx->endStepper('Done');
+
+    return command::Block($ctx->page->rows);
+}
