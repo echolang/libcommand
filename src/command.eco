@@ -248,6 +248,9 @@ public struct SubcommandInfo
     public string $description;
     public Positionals $positionals;
 
+    // every word after the last positional is the tail's, verbatim - see Command::passthrough
+    public bool $passesThrough;
+
     constructor(
         int32 $id,
         int32 $bit,
@@ -263,6 +266,7 @@ public struct SubcommandInfo
         $this->summary = $summary;
         $this->description = $description;
         $this->positionals = $positionals;
+        $this->passesThrough = false;
     }
 }
 
@@ -457,6 +461,24 @@ public class Command
     public function tail(bool $accepts) : void
     {
         $this->acceptsTail = $accepts;
+    }
+
+    #[docs::group: "Building"]
+    /**
+     * Hand every word after this subcommand's last positional to
+     * `Parsed.tail`, verbatim - flags and `--` included, and with no `--`
+     * needed to start it.
+     *
+     * For a subcommand that runs another program, `run <tool> <args...>`:
+     * the args are the tool's, so `--help` among them is the tool's help.
+     * The subcommand's own flags still go before its last positional. Needs
+     * a bounded positional count, since that is what says where it ends.
+     */
+    public function passthrough(Subcommand $cmd) : void
+    {
+        SubcommandInfo $row = $this->commands[$cmd->id];
+        $row->passesThrough = true;
+        $this->commands[$cmd->id] = $row;
     }
 
     #[docs::group: "Building"]

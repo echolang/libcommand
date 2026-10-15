@@ -215,6 +215,58 @@ test tail_refused_when_disabled
     assert(errText($r)->contains("does not take '--'"), 'separator');
 }
 
+test a_passthrough_hands_over_everything_after_its_last_positional
+{
+    command::Command $app = greet();
+    command::Subcommand $run = $app->command('run', 'run it', 'Run it.');
+    $app->positional($run, '<tool>', 'the tool', 'The tool.', 1, 1, 'What it works on');
+    $app->passthrough($run);
+    $app->tail(false);
+
+    array<string> $ran = array<string>();
+    $ran[] = 'run';
+    $ran[] = 'gen';
+    $ran[] = '--help';
+    $ran[] = 'api.yaml';
+    $ran[] = '--';
+    $ran[] = '-x';
+    command::Outcome $r = $app->parse(argv($ran));
+
+    assert($r->error == null, 'nothing refused');
+    assert(!$r->parsed->wantsHelp, 'the help is the tool\'s');
+    assert($r->parsed->positionals->count() == 1, 'one positional');
+    assert($r->parsed->positionals[0] == 'gen', 'the tool');
+    assert($r->parsed->tail->count() == 4, 'four for the tool');
+    assert($r->parsed->tail[0] == '--help', 'a flag, verbatim');
+    assert($r->parsed->tail[2] == '--', 'a separator, verbatim');
+    assert($r->parsed->tail[3] == '-x', 'after it');
+}
+
+test a_passthrough_still_reads_flags_before_its_positional
+{
+    command::Command $app = greet();
+    command::Subcommand $run = $app->command('run', 'run it', 'Run it.');
+    $app->positional($run, '[<tool>]', 'the tool', 'The tool.', 0, 1, 'What it works on');
+    $app->passthrough($run);
+    $app->tail(false);
+
+    array<string> $listed = array<string>();
+    $listed[] = 'run';
+    $listed[] = '--help';
+    command::Outcome $help = $app->parse(argv($listed));
+
+    assert($help->error == null, 'help');
+    assert($help->parsed->wantsHelp, 'the subcommand\'s own help');
+
+    array<string> $separated = array<string>();
+    $separated[] = 'run';
+    $separated[] = '--';
+    $separated[] = 'gen';
+    command::Outcome $refused = $app->parse(argv($separated));
+
+    assert($refused->error != null, 'a separator before the tool is still the table\'s to refuse');
+}
+
 test flag_after_positional_is_still_a_flag
 {
     command::Command $app = greet();

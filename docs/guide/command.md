@@ -48,6 +48,15 @@ The two integers are min and max. The default, if you never call `positional`, i
 
 `$app->tail(false)` refuses a leftover `--`. The default is to accept one, and the words after it land in `$parsed->tail`.
 
+A subcommand that runs another program wants its arguments without a `--` in front of them. `$app->passthrough($run)` hands every word after the subcommand's last positional to `$parsed->tail` exactly as written, flags and `--` included:
+
+```echo
+$app->positional($run, '[<tool>]', 'the tool', 'The program to run.', 0, 1, '');
+$app->passthrough($run);
+```
+
+So `app run gen --help api.yaml` gives `gen` as the positional and `--help api.yaml` to `gen`. The subcommand's own flags still go in front of the tool's name, and the passthrough starts only once the positional count reaches its max, so the max has to be a number and not `-1`.
+
 ## Values
 
 A closed set of values is `OptionValue(name, summary, description)`. You hand the set to the row with `values`. `valueOn` is how one name in that set is restricted to one command:

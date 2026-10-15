@@ -126,14 +126,21 @@ class Parser
 {
     public Command $app;
     Parsed $out;
+    array<string> $argv;
     array<string> $words;
+
+    // where each of `words` sits in `argv`, so a passthrough can hand over the rest exactly as it was
+    // written - a `--` the split above took out included
+    array<usize> $origins;
     usize $i;
 
     constructor(Command $app)
     {
         $this->app = $app;
         $this->out = Parsed();
+        $this->argv = array<string>();
         $this->words = array<string>();
+        $this->origins = array<usize>();
         $this->i = 0;
     }
 
@@ -149,7 +156,9 @@ class Parser
             $n = $n + 1;
         }
 
+        $this->argv = $argv;
         $this->words = array<string>();
+        $this->origins = array<usize>();
         bool $inTail = false;
         usize $at = 1;
 
@@ -169,6 +178,7 @@ class Parser
             }
 
             $this->words[] = $word;
+            $this->origins[] = $at - 1;
         }
 
         $this->i = 0;
@@ -241,6 +251,12 @@ class Parser
             }
 
             $this->out->positionals[] = $word;
+
+            if ($this->passesThroughHere()) {
+                $this->takeRest();
+                return null;
+            }
+
             $this->i = $this->i + 1;
             return null;
         }
@@ -300,6 +316,34 @@ class Parser
         $this->takeValue($option, $raw);
         $this->i = $this->i + 1;
         return null;
+    }
+
+    // the selected subcommand passes through, and the positional just taken was its last
+    function passesThroughHere() : bool
+    {
+        if (!$this->out->hasCommand) {
+            return false;
+        }
+
+        SubcommandInfo $info = $this->app->commands[$this->out->command->id];
+
+        return $info->passesThrough && i32Of($this->out->positionals->count()) == $info->positionals->max;
+    }
+
+    // everything after the current word, from argv as written, and the walk is over. A `--` among it is
+    // the program's, so it is no separator of this parse's
+    function takeRest() : void
+    {
+        $this->out->tail = array<string>();
+        usize $at = $this->origins[$this->i] + 1;
+
+        while ($at < $this->argv->count()) {
+            $this->out->tail[] = $this->argv[$at];
+            $at = $at + 1;
+        }
+
+        $this->out->sawSeparator = false;
+        $this->i = $this->words->count();
     }
 
     function takeHelpTopic() : Outcome?
