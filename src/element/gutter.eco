@@ -13,6 +13,8 @@
 
 namespace command::element;
 
+// every channel() copies this handle, from whatever thread draws
+#[atomic]
 class Run
 {
     public Stepper $stepper;

@@ -27,7 +27,7 @@ array<string> $used = array<string>();
 int32 $stale = 0;
 
 foreach ($pages as $page) {
-    string $text = guard io::readfile($page) else ($e) {
+    string $text = guard std::fs::readfile($page) else ($e) {
         die("render: cannot read {$page}: {$e->message()}");
     }
 
@@ -44,7 +44,7 @@ foreach ($pages as $page) {
         continue;
     }
 
-    guard io::writefile($page, $next) else ($e) {
+    guard std::fs::writefile($page, $next) else ($e) {
         die("render: cannot write {$page}: {$e->message()}");
     }
 

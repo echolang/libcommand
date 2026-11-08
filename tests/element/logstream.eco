@@ -237,3 +237,35 @@ test logstream_survives_a_pushing_thread
     assert(!$final->contains('line 495'), 'only the window');
     assert($final->contains('ingest'), 'bar');
 }
+
+test logstream_survives_workers_on_an_open_run
+{
+    command::TerminalCapabilities $caps = command::TerminalCapabilities(false, true, 80, true);
+    command::CLIContext $ctx = command::CLIContext::buffer($caps);
+    $ctx->beginStepper('fleet');
+    element::LogStream $log = $ctx->create<element::LogStream>(4);
+    element::Progress $bar = $log->progress();
+    $bar->start('scan', 8 * 400);
+
+    array<thread::handle> $workers = array<thread::handle>();
+
+    for (int32 $w = 0; $w < 8; $w++) {
+        result<thread::handle, thread::error> $r = thread::spawn(function() : void {
+            for (int32 $i = 0; $i < 400; $i++) {
+                $log->push("probe {$i}");
+                $log->print("done {$i}");
+                $bar->advance(1, 'hosts');
+            }
+        });
+        $workers[] = $r->unwrap();
+    }
+
+    foreach ($workers as &$h) {
+        $h->join();
+    }
+
+    $bar->finish();
+    $ctx->endStepper('ok');
+
+    assert($ctx->page->rows->count() >= 8 * 400, 'every printed row');
+}

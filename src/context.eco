@@ -4,6 +4,7 @@
 
 namespace command;
 
+#[atomic]
 #[docs::example: "examples/08-create-app.eco"]
 /**
  * The terminal a program is talking to: what it can do, and where it writes.
@@ -16,7 +17,8 @@ namespace command;
  * Widgets look up the live channel when they draw. Opening a run after
  * minting a widget is what that widget will render. Dropping a context
  * while a run is still open closes the run. `endStepper` is how the last
- * row gets to say something.
+ * row gets to say something. Threaded widgets reach the context and
+ * its run from every thread that draws, so both counts are atomic.
  *
  * ```echo
  * command::CLIContext $ctx = .resolve(.auto, .stderr);
